@@ -3,5 +3,5 @@ beautifulsoup4==4.12.2
 requests==2.32.2
 python-magic==0.4.27
 colorama==0.4.6
-tqdm==4.66.1
+tqdm==4.66.3
 regex==2023.10.3 
