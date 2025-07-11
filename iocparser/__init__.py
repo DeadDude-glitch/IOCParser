@@ -4,13 +4,13 @@ IOCParser - A tool for extracting Indicators of Compromise from security reports
 Author: Marc Rivero | @seifreed
 """
 
+__version__ = "1.0.0"
+
 from iocparser.modules.extractor import IOCExtractor
 from iocparser.modules.file_parser import PDFParser, HTMLParser
 from iocparser.modules.output_formatter import JSONFormatter, TextFormatter
 from iocparser.modules.warninglists import MISPWarningLists
 from iocparser.main import detect_file_type, get_output_filename
-
-__version__ = "1.0.0"
 
 # Export main functionality for library use
 __all__ = [

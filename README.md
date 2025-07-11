@@ -2,7 +2,8 @@
 
 A tool for extracting Indicators of Compromise (IOCs) from security reports in HTML, PDF, and plain text formats.
 
-Author: Marc Rivero | @seifreed
+Author: Marc Rivero | @seifreed  
+Version: 1.0.0
 
 ## Features
 
@@ -28,6 +29,14 @@ Author: Marc Rivero | @seifreed
 
 ## Installation
 
+### From PyPI (Recommended)
+
+```bash
+pip install iocparser
+```
+
+### From Source
+
 ```bash
 # Clone the repository
 git clone https://github.com/seifreed/iocparser.git
@@ -44,55 +53,71 @@ pip install -e .
 pip install -r requirements.txt
 ```
 
+## Quick Start
+
+```bash
+# Initialize and download MISP warning lists (do this first)
+iocparser --init
+
+# Analyze a PDF file
+iocparser -f report.pdf
+
+# Analyze an HTML file
+iocparser -f report.html
+
+# Analyze a text file
+iocparser -f report.txt
+```
+
 ## Command Line Usage
 
 ### Basic Usage
 
 ```bash
 # Initialize and download MISP warning lists (do this first)
-python -m iocparser.main --init
+iocparser --init
 
 # Analyze a PDF file
-python -m iocparser.main -f report.pdf
+iocparser -f report.pdf
 
 # Analyze an HTML file
-python -m iocparser.main -f report.html
+iocparser -f report.html
 
 # Analyze a text file
-python -m iocparser.main -f report.txt
+iocparser -f report.txt
 ```
 
 ### File Type Options
 
 ```bash
 # Force specific file type (pdf, html, text)
-python -m iocparser.main -f report -t pdf
-python -m iocparser.main -f report -t html
-python -m iocparser.main -f report -t text
+iocparser -f report -t pdf
+iocparser -f report -t html
+iocparser -f report -t text
 ```
 
 ### Output Options
 
 ```bash
 # Save outputs to a specific file
-python -m iocparser.main -f report.pdf -o results.json
-python -m iocparser.main -f report.pdf -o results.txt
+iocparser -f report.pdf -o results.json
+iocparser -f report.pdf -o results.txt
 
 # Print results to screen only
-python -m iocparser.main -f report.pdf -o -
+iocparser -f report.pdf -o -
 
 # Use JSON format (default is text)
-python -m iocparser.main -f report.pdf --json
+iocparser -f report.pdf --json
 ```
 
 ### Analyzing from URL
 
 ```bash
 # Analyze a report from a URL
-python -m iocparser.main -u https://example.com/report.html
+iocparser -u https://example.com/report.html
 
 # Specify content type for a URL
-python -m iocparser.main -u https://example.com/report -t html
+iocparser -u https://example.com/report -t html
 ```
 
 ### Additional Options
@@ -192,17 +217,17 @@ all_iocs = extractor.extract_all(text)  # Returns a dictionary with all IOCs
 
 ### Extract IOCs from a local PDF report
 ```bash
-python -m iocparser.main -f reports/APT28_report.pdf
+iocparser -f reports/APT28_report.pdf
 ```
 
 ### Extract IOCs from a URL and save in JSON format
 ```bash
-python -m iocparser.main -u https://example.com/security-report.pdf --json
+iocparser -u https://example.com/security-report.pdf --json
 ```
 
 ### Extract IOCs from an HTML file without defanging
 ```bash
-python -m iocparser.main -f report.html --no-defang
+iocparser -f report.html --no-defang
 ```
 
 ### Use in a Python script to process multiple files

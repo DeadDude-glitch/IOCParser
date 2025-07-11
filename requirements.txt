@@ -1,7 +1,7 @@
-pdfplumber==0.10.3
-beautifulsoup4==4.12.2
-requests==2.32.4
-python-magic==0.4.27
-colorama==0.4.6
-tqdm==4.66.3
-regex==2023.10.3 
+colorama>=0.4.0
+python-magic>=0.4.0
+requests>=2.25.0
+tqdm>=4.60.0
+pdfminer.six>=20201018
+beautifulsoup4>=4.9.0
+lxml>=4.6.0 

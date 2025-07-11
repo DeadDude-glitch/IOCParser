@@ -32,7 +32,7 @@ def banner():
     print(f"""{Fore.CYAN}
 ╔═══════════════════════════════════════════════╗
 ║                                               ║
-║              IOC Parser v1.0                  ║
+║              IOC Parser v1.0.0                ║
 ║                                               ║
 ║     Indicators of Compromise Extractor        ║
 ║                                               ║
