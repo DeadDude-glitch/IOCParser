@@ -55,7 +55,8 @@ class IOCExtractor:
                 r'(?:SHA-256|SHA256|sha256)\s*:?\s*([a-fA-F0-9]{64})|\b([a-fA-F0-9]{64})\b',
             ),
             'sha512': re.compile(
-                r'(?:SHA-512|SHA512|sha512)\s*:?\s*([a-fA-F0-9]{128})|\b([a-fA-F0-9]{128})\b',
+                r'(?:SHA-512|SHA512|sha512)\s*:?\s*([a-fA-F0-9]{128})|'
+                r'(?:^|\s)([a-fA-F0-9]{128})(?:\s|$)',
             ),
             'ssdeep': re.compile(r'\b\d{2,}:[A-Za-z0-9/+]{3,}:[A-Za-z0-9/+]{3,}\b'),
             'imphash': re.compile(r'\b[a-fA-F0-9]{32}\b'),  # Same as MD5 but context-dependent
@@ -67,13 +68,18 @@ class IOCExtractor:
                 r'[a-zA-Z]{2,63})\b',
             ),
             'ips': re.compile(
-                r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)[\[\(]?\.[\]\)]?){3}'
-                r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b',
+                # Match potential IPs - we'll validate octets later
+                # Handles both normal and defanged formats
+                r'\b\d{1,3}(?:[\[\(\{]?\.[\]\)\}]?\d{1,3}){3}\b',
             ),
             'ipv6': re.compile(
-                r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|'
-                r'\b(?:[0-9a-fA-F]{1,4}:){1,7}:\b|'
-                r'\b::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}\b',
+                r'(?:^|(?<=\s))(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}(?=\s|$)|'  # Full format
+                r'(?:^|(?<=\s))(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}(?=\s|$)|'  # Compressed
+                r'(?:^|(?<=\s))(?:[0-9a-fA-F]{1,4}:){1,6}::[0-9a-fA-F]{1,4}(?=\s|$)|'  # xxxx::xxxx
+                r'(?:^|(?<=\s))(?:[0-9a-fA-F]{1,4}:)+::(?=\s|$)|'  # xxxx:: (ending)
+                r'(?:^|(?<=\s))::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}(?=\s|$)|'  # ::xxxx
+                r'(?:^|(?<=\s))::1(?=\s|$)|(?:^|(?<=\s))::(?=\s|$)|'  # Special cases ::1 and ::
+                r'(?:^|(?<=\s))::ffff:[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(?=\s|$)',  # IPv4-mapped
             ),
             'urls': re.compile(
                 r'\b(?:https?|hxxps?|h\[\.\]ttps?|s?ftp)://'
@@ -88,7 +94,7 @@ class IOCExtractor:
             ),
 
             # Cryptocurrency
-            'bitcoin': re.compile(r'\b(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}\b'),
+            'bitcoin': re.compile(r'\b(bc1[a-zA-HJ-NP-Z0-9]{39,59}|[13][a-zA-HJ-NP-Z0-9]{25,34})\b'),
             'ethereum': re.compile(r'\b0x[a-fA-F0-9]{40}\b'),
             'monero': re.compile(r'\b4[0-9AB][a-zA-Z0-9]{93}\b'),
 
@@ -127,8 +133,11 @@ class IOCExtractor:
                 re.IGNORECASE,
             ),
             'filepaths': re.compile(
-                r'\b[A-Z]:\\(?:[A-Za-z0-9-_\.\s]+\\)+[A-Za-z0-9-_\.\s]+(?:\.[A-Za-z]{2,4})?\b|'
-                r'/(?:usr|bin|etc|var|tmp|home|opt|proc|sys|lib|dev)/(?:[A-Za-z0-9-_\.]+/)*[A-Za-z0-9-_\.]+\b',
+                r'(?:'
+                r'(?:%[A-Z_]+%\\|[A-Za-z]:\\)(?:[^\s<>:"/|?*\r\n\\]+\\)*[^\s<>:"/|?*\r\n\\]+(?:\.[A-Za-z0-9]{1,10})?(?=[\s"\u201c\u201d,;]|$)|'
+                r'/(?:usr|bin|etc|var|tmp|home|opt|proc|sys|lib|dev)/(?:[A-Za-z0-9-_\.]+/)*[A-Za-z0-9-_\.]+(?=[\s"\u201c\u201d,;]|$)'
+                r')',
+                re.IGNORECASE,
             ),
 
             # User agents
@@ -145,6 +154,12 @@ class IOCExtractor:
 
             # JWT tokens
             'jwt': re.compile(r'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'),
+
+            # Certificate serial numbers
+            'cert_serials': re.compile(
+                r'\b([a-fA-F0-9]{2}(?::[a-fA-F0-9]{2}){7,31})\b|'  # Colon-separated (8-32 bytes)
+                r'(?:serial|certificate|cert|thumbprint)[\s:]+([a-fA-F0-9]{16,64})\b'  # Hex with context
+            ),
         }
 
         # Common file extensions
@@ -255,9 +270,36 @@ class IOCExtractor:
             return False
 
         # Check for sequential patterns
-        return not any(pattern in hash_string.lower() for pattern in [
+        if any(pattern in hash_string.lower() for pattern in [
             '0123456789', 'abcdef', 'fedcba', '9876543210',
-        ])
+        ]):
+            return False
+        
+        # Additional checks for long hashes (SHA512)
+        if len(hash_string) >= 64:
+            # Check for obvious text patterns in hex-decoded form
+            try:
+                import binascii
+                decoded = binascii.unhexlify(hash_string)
+                
+                # Check for common file signatures that indicate it's not a hash
+                if decoded.startswith((b'MZ', b'PK', b'7z', b'\x89PNG', b'\xff\xd8\xff')):
+                    return False
+                
+                # Check for readable ASCII text (likely encoded strings, not hashes)
+                try:
+                    text = decoded.decode('ascii', errors='strict')
+                    # If more than 50% are printable ASCII chars, likely not a hash
+                    printable_chars = sum(1 for c in text if 32 <= ord(c) <= 126 or c in '\t\n\r')
+                    if printable_chars / len(text) > 0.5:
+                        return False
+                except UnicodeDecodeError:
+                    pass  # Good, binary data as expected for a hash
+                    
+            except (ValueError, ImportError):
+                pass  # If hex decode fails, continue with other checks
+        
+        return True
 
     def _is_valid_domain(self, domain: str) -> bool:
         """
@@ -448,7 +490,8 @@ class IOCExtractor:
 
     def extract_sha512(self, text: str) -> List[str]:
         """Extract SHA512 hashes from text."""
-        return self._extract_pattern(text, 'sha512')
+        candidates = self._extract_pattern(text, 'sha512')
+        return [h for h in candidates if self._is_valid_hash_pattern(h)]
 
     def extract_ssdeep(self, text: str) -> List[str]:
         """Extract ssdeep hashes from text."""
@@ -481,12 +524,25 @@ class IOCExtractor:
         for ip in ips:
             # Clean existing defanging
             clean_ip = ip.replace('[.]', '.').replace('(.)', '.').replace('{.}', '.')
-
+            clean_ip = re.sub(r'[\[\(\{]\.[\]\)\}]', '.', clean_ip)  # Handle other defang patterns
+            
             # Validate IP
             parts = clean_ip.split('.')
             if len(parts) == IPv4_PARTS_COUNT:
                 try:
-                    if all(0 <= int(part) <= IPv4_MAX_OCTET for part in parts):
+                    valid = True
+                    for part in parts:
+                        # Check for leading zeros (except "0" itself)
+                        if len(part) > 1 and part[0] == '0':
+                            valid = False
+                            break
+                        # Check range 0-255
+                        num = int(part)
+                        if not (0 <= num <= IPv4_MAX_OCTET):
+                            valid = False
+                            break
+                    
+                    if valid:
                         if self.defang:
                             clean_ip = self._defang_ip(clean_ip)
                         clean_ips.append(clean_ip)
@@ -592,7 +648,18 @@ class IOCExtractor:
 
     def extract_bitcoin(self, text: str) -> List[str]:
         """Extract Bitcoin addresses from text."""
-        return self._extract_pattern(text, 'bitcoin')
+        potential_addresses = self._extract_pattern(text, 'bitcoin')
+        validated_addresses = []
+        
+        for addr in potential_addresses:
+            # Skip if it's clearly a hex-only MD5 (32 chars, all hex)
+            if len(addr) == 32 and all(c in '0123456789abcdefABCDEF' for c in addr):
+                continue
+            # Bitcoin addresses should have mixed case or contain non-hex chars
+            if len(addr) >= 26 and (not all(c in '0123456789abcdefABCDEF' for c in addr)):
+                validated_addresses.append(addr)
+        
+        return validated_addresses
 
     def extract_ethereum(self, text: str) -> List[str]:
         """Extract Ethereum addresses from text."""
@@ -680,27 +747,54 @@ class IOCExtractor:
             clean_path = path.strip()
 
             # Must be reasonable length and structure
-            if (50 < len(clean_path) < 200 and
+            if (20 < len(clean_path) < 300 and
                 ('\\' in clean_path or '/' in clean_path) and
                 not any(word in clean_path.lower() for word in [
                     'folder on the', 'uploaded to', 'artifacts were', 'initially',
                 ])):
-                # Extract just the actual path part
-                if '\\' in clean_path:
-                    # Windows path
-                    path_parts = clean_path.split()
-                    for part in path_parts:
-                        if ':\\' in part and len(part) > 10:
-                            valid_paths.append(part)
-                            break
-                else:
-                    valid_paths.append(clean_path)
+                # Clean up and validate path
+                clean_part = clean_path.rstrip('",;\'"').strip()
+                
+                # Check if it's a valid Windows path (drive letter or env var)
+                if (':\\' in clean_part or clean_part.startswith('%')):
+                    valid_paths.append(clean_part)
+                # Check if it's a valid Unix path
+                elif clean_part.startswith('/') and len(clean_part) > 5:
+                    valid_paths.append(clean_part)
 
         return list(set(valid_paths))
 
     def extract_mac_addresses(self, text: str) -> List[str]:
         """Extract MAC addresses from text."""
-        return self._extract_pattern(text, 'mac_addresses')
+        candidates = self._extract_pattern(text, 'mac_addresses')
+        valid_macs = []
+        
+        for mac in candidates:            
+            # Handle Cisco format (0011.2233.4455)
+            if '.' in mac and len(mac.replace('.', '')) == 12:
+                # Convert Cisco format to standard
+                hex_only = mac.replace('.', '')
+                if all(c in '0123456789abcdefABCDEF' for c in hex_only):
+                    formatted = ':'.join([hex_only[i:i+2] for i in range(0, 12, 2)])
+                    valid_macs.append(formatted)
+                continue
+            
+            # Normalize separators for validation
+            normalized = mac.replace('-', ':').lower()
+            
+            # Must be exactly 12 hex chars when separators removed
+            hex_only = normalized.replace(':', '')
+            if len(hex_only) != 12:
+                continue
+                
+            # Check if it's exactly 6 groups of 2 hex chars
+            if ':' in normalized:
+                parts = normalized.split(':') 
+                if (len(parts) == 6 and 
+                    all(len(part) == 2 and all(c in '0123456789abcdef' for c in part) for part in parts)):
+                    valid_macs.append(mac)
+        
+        return list(set(valid_macs))
 
     def extract_user_agents(self, text: str) -> List[str]:
         """Extract user agent strings from text."""
@@ -733,6 +827,31 @@ class IOCExtractor:
     def extract_jwt(self, text: str) -> List[str]:
         """Extract JWT tokens from text."""
         return self._extract_pattern(text, 'jwt')
+
+    def extract_cert_serials(self, text: str) -> List[str]:
+        """Extract certificate serial numbers from text."""
+        candidates = self._extract_pattern(text, 'cert_serials')
+        valid_serials = []
+        
+        for candidate in candidates:
+            # Normalize format - convert to colon-separated if it's plain hex
+            if ':' not in candidate and len(candidate) >= 16:
+                # Convert plain hex to colon-separated format
+                normalized = ':'.join([candidate[i:i+2] for i in range(0, len(candidate), 2)])
+            else:
+                normalized = candidate
+            
+            # Basic validation - should be reasonable length and format
+            if ':' in normalized:
+                parts = normalized.split(':')
+                # Valid serial numbers are typically 8-20 bytes (16-40 hex chars)
+                # Minimum 8 parts to avoid short false positives like "ab:cd"
+                if 8 <= len(parts) <= 32 and all(len(part) == 2 and part.isalnum() for part in parts):
+                    # Avoid MAC addresses (exactly 6 parts) and IPv6 (contains non-hex)
+                    if len(parts) != 6 and all(c in '0123456789abcdefABCDEF' for c in normalized.replace(':', '')):
+                        valid_serials.append(normalized.lower())
+        
+        return list(set(valid_serials))
 
     def extract_hosts(self, text: str) -> List[str]:
         """
@@ -818,6 +937,7 @@ class IOCExtractor:
             ('yara', self.extract_yara_rules),
             ('asn', self.extract_asn),
             ('jwt', self.extract_jwt),
+            ('cert_serials', self.extract_cert_serials),
             ('hosts', self.extract_hosts),
         ]
 

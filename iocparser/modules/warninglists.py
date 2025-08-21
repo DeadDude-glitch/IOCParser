@@ -10,8 +10,10 @@ import ipaddress
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, cast
+from typing import Dict, List, Optional, Set, Tuple, Union, cast
 from urllib.parse import urlparse
 
 import requests
@@ -52,11 +54,20 @@ class MISPWarningLists:
         self.github_api_base: str = "https://api.github.com/repos/MISP/misp-warninglists/contents/lists"
         self.github_raw_base: str = "https://raw.githubusercontent.com/MISP/misp-warninglists/main/lists"
 
+        # OPTIMIZATION: Pre-computed lookup structures
+        self.string_lookups: Dict[str, Set[str]] = {}  # {value_lower: {list_ids}}
+        self.compiled_regex: Dict[str, List[re.Pattern]] = {}  # {list_id: [compiled_patterns]}
+        self.cidr_networks: Dict[str, List[ipaddress.IPv4Network]] = {}  # {list_id: [networks]}
+        self.lists_by_ioc_type: Dict[str, List[str]] = {}  # {ioc_type: [relevant_list_ids]}
+
         # Create the data directory if it doesn't exist
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         # Load or update the lists
         self._load_or_update_lists()
+        
+        # OPTIMIZATION: Pre-process lists for faster lookups
+        self._preprocess_lists()
 
     def _load_or_update_lists(self) -> None:
         """Load lists from cache or update them if necessary"""
@@ -102,29 +113,30 @@ class MISPWarningLists:
             logger.info(f"Downloading {len(list_directories)} MISP warning lists...")
             failed_downloads: List[str] = []
 
-            def _download_single_list(directory: str) -> Optional[WarningListDict]:
+            def _download_single_list(directory: str) -> Tuple[str, Optional[WarningListDict]]:
                 """Download a single warning list."""
                 try:
                     list_url = f"{self.github_raw_base}/{directory}/list.json"
                     list_response = requests.get(list_url, timeout=30)
                     list_response.raise_for_status()
-                except Exception as e:
-                    logger.warning(f"Error downloading warning list {directory}: {e}")
-                    return None
-                else:
                     response_json: JSONData = list_response.json()
                     result: WarningListDict = cast('WarningListDict', response_json)
-                    return result
+                    return directory, result
+                except Exception as e:
+                    logger.warning(f"Error downloading warning list {directory}: {e}")
+                    return directory, None
 
-            directory_progress: tqdm[str] = tqdm(
-                list_directories, desc="Downloading warning lists", unit="list",
-            )
-            for directory in directory_progress:
-                warning_list = _download_single_list(directory)
-                if warning_list is not None:
-                    self.warning_lists[directory] = warning_list
-                else:
-                    failed_downloads.append(directory)
+            # OPTIMIZATION: Use ThreadPoolExecutor for parallel downloads
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(_download_single_list, d) for d in list_directories]
+                
+                for future in tqdm(as_completed(futures), total=len(list_directories), 
+                                 desc="Downloading warning lists"):
+                    directory, warning_list = future.result()
+                    if warning_list is not None:
+                        self.warning_lists[directory] = warning_list
+                    else:
+                        failed_downloads.append(directory)
 
             # Save lists to cache
             with self.cache_file.open('w') as f:
@@ -150,6 +162,87 @@ class MISPWarningLists:
                 except Exception:
                     logger.exception("Could not load warning lists from cache")
 
+    def _preprocess_lists(self) -> None:
+        """Pre-process warning lists for optimized lookups"""
+        logger.info("Pre-processing warning lists for optimized lookups...")
+        
+        for list_id, warning_list in self.warning_lists.items():
+            list_type = str(warning_list.get('type', 'string'))
+            values_val = warning_list.get('list', [])
+            
+            if not isinstance(values_val, list):
+                continue
+                
+            # Pre-process based on list type
+            if list_type == 'string':
+                # OPTIMIZATION: Create hash sets for O(1) lookups
+                for value in values_val:
+                    if value is not None:
+                        value_lower = str(value).lower()
+                        if value_lower not in self.string_lookups:
+                            self.string_lookups[value_lower] = set()
+                        self.string_lookups[value_lower].add(list_id)
+                        
+            elif list_type == 'regex':
+                # OPTIMIZATION: Pre-compile regex patterns
+                compiled_patterns = []
+                for pattern in values_val:
+                    if pattern is not None:
+                        try:
+                            compiled_patterns.append(re.compile(str(pattern), re.IGNORECASE))
+                        except (re.error, TypeError):
+                            logger.debug(f"Invalid regex pattern: {pattern}")
+                            continue
+                if compiled_patterns:
+                    self.compiled_regex[list_id] = compiled_patterns
+                    
+            elif list_type == 'cidr':
+                # OPTIMIZATION: Pre-parse CIDR networks
+                networks = []
+                for cidr_value in values_val:
+                    if cidr_value is not None and '/' in str(cidr_value):
+                        try:
+                            networks.append(ipaddress.ip_network(str(cidr_value), strict=False))
+                        except (ValueError, ipaddress.AddressValueError):
+                            logger.debug(f"Invalid CIDR entry: {cidr_value}")
+                            continue
+                if networks:
+                    self.cidr_networks[list_id] = networks
+            
+            # OPTIMIZATION: Group lists by applicable IOC types
+            matching_attrs = warning_list.get('matching_attributes', [])
+            if isinstance(matching_attrs, list):
+                for attr in matching_attrs:
+                    attr_str = str(attr) if isinstance(attr, str) else str(attr.get('name', ''))
+                    
+                    # Map attributes to IOC types
+                    ioc_type_mapping = {
+                        'domain': 'domains',
+                        'hostname': 'domains',
+                        'fqdn': 'domains',
+                        'ip': 'ips',
+                        'ipv4': 'ips',
+                        'ipv6': 'ipv6',
+                        'url': 'urls',
+                        'uri': 'urls',
+                        'email': 'emails',
+                        'md5': 'md5',
+                        'sha1': 'sha1',
+                        'sha256': 'sha256',
+                        'sha512': 'sha512',
+                        'cve': 'cves',
+                    }
+                    
+                    for keyword, ioc_type in ioc_type_mapping.items():
+                        if keyword in attr_str.lower():
+                            if ioc_type not in self.lists_by_ioc_type:
+                                self.lists_by_ioc_type[ioc_type] = []
+                            if list_id not in self.lists_by_ioc_type[ioc_type]:
+                                self.lists_by_ioc_type[ioc_type].append(list_id)
+
+        logger.info("Pre-processing complete")
+
+    @lru_cache(maxsize=10000)
     def _clean_defanged_value(self, value: str) -> str:
         """
         Remove common defanging patterns from a value.
@@ -238,9 +331,10 @@ class MISPWarningLists:
 
         return None
 
+    @lru_cache(maxsize=5000)
     def check_value(self, value: str, ioc_type: str) -> Tuple[bool, Optional[Dict[str, str]]]:
         """
-        Check if a value is on any warning list.
+        Optimized check if a value is on any warning list.
 
         Args:
             value: The value to check
@@ -249,26 +343,86 @@ class MISPWarningLists:
         Returns:
             Tuple of (is_in_warning_list, warning_info_dict or None)
         """
-        misp_types: List[str] = self._get_misp_types_for_ioc(ioc_type)
-
         # Clean value for checking (remove defang markers)
         clean_value: str = self._clean_defanged_value(value)
+        clean_value_lower = clean_value.lower()
+
+        # OPTIMIZATION: Only check relevant lists for this IOC type
+        relevant_list_ids = self.lists_by_ioc_type.get(ioc_type, [])
+        
+        # Also check all lists if no specific mapping found
+        if not relevant_list_ids:
+            relevant_list_ids = list(self.warning_lists.keys())
 
         # Special handling for URLs - extract domain for checking
         extracted_domain: Optional[str] = None
         if ioc_type == 'urls':
             extracted_domain = self._extract_domain_from_url(clean_value)
 
-        # Check each MISP list
-        for list_id, warning_list in self.warning_lists.items():
-            if not self._is_list_applicable(warning_list, misp_types, ioc_type):
-                continue
+        # OPTIMIZATION: Check string lookups first (fastest)
+        if clean_value_lower in self.string_lookups:
+            for list_id in self.string_lookups[clean_value_lower]:
+                if list_id in relevant_list_ids:
+                    warning_list = self.warning_lists[list_id]
+                    return True, {
+                        'name': str(warning_list.get('name', list_id)),
+                        'description': str(warning_list.get('description', ''))
+                    }
+        
+        # Also check extracted domain for URLs
+        if extracted_domain and extracted_domain.lower() in self.string_lookups:
+            for list_id in self.string_lookups[extracted_domain.lower()]:
+                if list_id in relevant_list_ids:
+                    warning_list = self.warning_lists[list_id]
+                    return True, {
+                        'name': str(warning_list.get('name', list_id)),
+                        'description': str(warning_list.get('description', ''))
+                    }
 
-            result = self._check_against_warning_list(
-                clean_value, extracted_domain, warning_list, list_id,
-            )
-            if result:
-                return True, result
+        # Check regex patterns (slower)
+        for list_id in relevant_list_ids:
+            if list_id in self.compiled_regex:
+                for pattern in self.compiled_regex[list_id]:
+                    if pattern.search(clean_value):
+                        warning_list = self.warning_lists[list_id]
+                        return True, {
+                            'name': str(warning_list.get('name', list_id)),
+                            'description': str(warning_list.get('description', ''))
+                        }
+                    if extracted_domain and pattern.search(extracted_domain):
+                        warning_list = self.warning_lists[list_id]
+                        return True, {
+                            'name': str(warning_list.get('name', list_id)),
+                            'description': str(warning_list.get('description', ''))
+                        }
+
+        # Check CIDR ranges for IPs
+        if ioc_type in ['ips', 'ipv6']:
+            try:
+                ip_obj = ipaddress.ip_address(clean_value)
+                for list_id in relevant_list_ids:
+                    if list_id in self.cidr_networks:
+                        for network in self.cidr_networks[list_id]:
+                            if ip_obj in network:
+                                warning_list = self.warning_lists[list_id]
+                                return True, {
+                                    'name': str(warning_list.get('name', list_id)),
+                                    'description': str(warning_list.get('description', ''))
+                                }
+            except (ValueError, ipaddress.AddressValueError):
+                pass
+
+        # Fallback to old method for any lists not preprocessed (substring type)
+        for list_id in relevant_list_ids:
+            warning_list = self.warning_lists[list_id]
+            if warning_list.get('type') == 'substring':
+                misp_types: List[str] = self._get_misp_types_for_ioc(ioc_type)
+                if self._is_list_applicable(warning_list, misp_types, ioc_type):
+                    result = self._check_against_warning_list(
+                        clean_value, extracted_domain, warning_list, list_id,
+                    )
+                    if result:
+                        return True, result
 
         return False, None
 

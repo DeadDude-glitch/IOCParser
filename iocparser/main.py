@@ -309,7 +309,7 @@ def print_warning_lists(warnings: Dict[str, List[Dict[str, str]]]) -> None:
         print(f"\n{Fore.YELLOW}IOCs of type {ioc_type} with warnings:{Style.RESET_ALL}")
         for warning in type_warnings:
             print(
-                f"  {Fore.RED}● {warning['value']} - "
+                f"  {Fore.RED}- {warning['value']} - "
                 f"List: {warning['warning_list']}{Style.RESET_ALL}",
             )
             print(f"    {Fore.YELLOW}Description: {warning['description']}{Style.RESET_ALL}")
@@ -647,7 +647,7 @@ def display_results(
 
     for ioc_type, ioc_list in normal_iocs.items():
         if ioc_list:
-            print(f"    {Fore.CYAN}● {ioc_type}: {len(ioc_list)}{Style.RESET_ALL}")
+            print(f"    {Fore.CYAN}- {ioc_type}: {len(ioc_list)}{Style.RESET_ALL}")
 
     if warning_iocs:
         print_warning_lists(warning_iocs)

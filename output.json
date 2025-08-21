@@ -1,0 +1,112 @@
+[36m
+╔═══════════════════════════════════════════════╗
+║                                               ║
+║              IOC Parser v1.0.1                ║
+║                                               ║
+║     Indicators of Compromise Extractor        ║
+║                                               ║
+║       Author: Marc Rivero | @seifreed         ║
+║                                               ║
+╚═══════════════════════════════════════════════╝
+[0m
+Extracting text from HTML: /Users/seifreed/tools/malware/IOCParser/temp/117119.html
+    [36m- md5: 27[0m
+    [36m- ips: 4[0m
+    [36m- urls: 1[0m
+    [36m- cves: 1[0m
+    [36m- registry: 1[0m
+    [36m- filepaths: 4[0m
+    [36m- mac_addresses: 2[0m
+    [36m- cert_serials: 1[0m
+WARNING - IOCs found that might be false positives according to MISP warning lists:
+
+[33mIOCs of type ips with warnings:[0m
+  [31m- 103[.]237[.]92[.]191 - List: Specialized list of vpn-ipv4 addresses belonging to common VPN providers and datacenters[0m
+    [33mDescription: Specialized list of vpn-ipv4 addresses belonging to common VPN providers and datacenters[0m
+  [31m- 47[.]238[.]124[.]68 - List: Specialized list of vpn-ipv4 addresses belonging to common VPN providers and datacenters[0m
+    [33mDescription: Specialized list of vpn-ipv4 addresses belonging to common VPN providers and datacenters[0m
+
+[33mIOCs of type filepaths with warnings:[0m
+  [31m- C:\Users\[username]\Downloads\2024-08-01_2024-12-31Data.scr - List: Unattributed phone number.[0m
+    [33mDescription: Numbers that cannot be attributed because they reserved for different purposes.[0m
+WARNING - Found 3 potential false positives
+{
+    "cert_serials": [
+        "df:2d:51:bf:e8:ec:0c:dc:d9:9a:3e:e8:57:1b:d9"
+    ],
+    "cves": [
+        "CVE-2025-29824"
+    ],
+    "filepaths": [
+        "C:\\Users\\[username]\\Downloads\\2024-2025Top&Data.scr",
+        "C:\\Users\\[username]\\Downloads\\Corporate",
+        "C:\\Windows\\System32\\curl.exe\u201d",
+        "C:\\users\\[username]\\downloads\\2023-2024clientlist\uff06.scr"
+    ],
+    "ips": [
+        "118[.]107[.]46[.]174",
+        "118[.]99[.]3[.]33",
+        "154[.]91[.]183[.]174",
+        "156[.]241[.]134[.]49"
+    ],
+    "mac_addresses": [
+        "0c:dc:d9:9a:3e:e8",
+        "df:2d:51:bf:e8:ec"
+    ],
+    "md5": [
+        "04bf56c6491c5a455efea7dbf94145f1",
+        "084caf4df499141d404b7199aa2c2131",
+        "160a80a754fd14679e5a7b5fc4aed672",
+        "17e71cd415272a6469386f95366d3b64",
+        "2750d4d40902d123a80d24f0d0acc454",
+        "31385291c01bb25d635d098f91708905",
+        "318f5bf9894ac424fd4faf4ba857155e",
+        "441b35ee7c366d4644dca741f51eb729",
+        "4ecd2cf02bdf19cdbc5507e85a32c657",
+        "512778f0de31fcce281d87f00affa4a8",
+        "58f54b88f2009864db7e7a5d1610d27d",
+        "5f7087039cb42090003cc9dbb493215e",
+        "605f25606bb925d61ccc47f0150db674",
+        "64dfcdd8f511f4c71d19f5a58139f2c0",
+        "6c12ec3795b082ec8d5e294e6a5d6d01",
+        "6cad01ca86e8cd5339ff1e8fff4c8558",
+        "8008375eec7550d6d8e0eaf24389cf81",
+        "961188d6903866496c954f03ecff2a72",
+        "a6352b2c4a3e00de9e84295c8d505dad",
+        "bb23d0e061a8535f4cb8c6d724839883",
+        "cdd5c08b43238c47087a5d914d61c943",
+        "cf7100bbb5ceb587f04a1f42939e24ab",
+        "d09fd377d8566b9d7a5880649a0192b4",
+        "d6d6ddf71c2a46b4735c20ec16270ab6",
+        "e055aa2b77890647bdf5878b534fba2c",
+        "e723258b75fee6fbd8095f0a2ae7e53c",
+        "eb8d53f9276d67afafb393a5b16e7c61"
+    ],
+    "registry": [
+        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\MyStartupApp"
+    ],
+    "urls": [
+        "hxxps://holoohg[.]oss-cn-hongkong[.]aliyuncs"
+    ],
+    "warning_list_matches": {
+        "filepaths": [
+            {
+                "description": "Numbers that cannot be attributed because they reserved for different purposes.",
+                "value": "C:\\Users\\[username]\\Downloads\\2024-08-01_2024-12-31Data.scr",
+                "warning_list": "Unattributed phone number."
+            }
+        ],
+        "ips": [
+            {
+                "description": "Specialized list of vpn-ipv4 addresses belonging to common VPN providers and datacenters",
+                "value": "103[.]237[.]92[.]191",
+                "warning_list": "Specialized list of vpn-ipv4 addresses belonging to common VPN providers and datacenters"
+            },
+            {
+                "description": "Specialized list of vpn-ipv4 addresses belonging to common VPN providers and datacenters",
+                "value": "47[.]238[.]124[.]68",
+                "warning_list": "Specialized list of vpn-ipv4 addresses belonging to common VPN providers and datacenters"
+            }
+        ]
+    }
+}
