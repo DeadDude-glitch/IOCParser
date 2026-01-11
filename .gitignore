@@ -256,8 +256,8 @@ MANIFEST.in
 # Tests directory - SHOULD be tracked in repo
 # tests/
 
-# Old modules directory (keep locally, not in repo)
-modules/
+# Old modules directory at root level (keep locally, not in repo)
+/modules/
 
 # Backup files
 *.backup
