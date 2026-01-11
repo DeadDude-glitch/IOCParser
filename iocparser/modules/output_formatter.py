@@ -33,6 +33,10 @@ class OutputFormatter(ABC):
         self.data: Dict[str, List[Union[str, Dict[str, str]]]] = data
         self.warning_iocs: Dict[str, List[Dict[str, str]]] = warning_iocs or {}
 
+    def _ensure_directory(self, output_file: str) -> None:
+        """Create parent directory if it doesn't exist."""
+        Path(output_file).resolve().parent.mkdir(parents=True, exist_ok=True)
+
     @abstractmethod
     def format(self) -> str:
         """
@@ -99,13 +103,10 @@ class JSONFormatter(OutputFormatter):
         Args:
             output_file: Path to the output file
         """
-        # Create directory if it doesn't exist
-        Path(output_file).resolve().parent.mkdir(parents=True, exist_ok=True)
-
+        self._ensure_directory(output_file)
         data_to_serialize = self._prepare_data_for_json()
 
         with Path(output_file).open('w', encoding='utf-8') as f:
-            # Use type: ignore for json.dump since it accepts complex types
             json.dump(data_to_serialize, f, indent=4, ensure_ascii=False, sort_keys=True)
 
 
@@ -141,6 +142,7 @@ class TextFormatter(OutputFormatter):
         ('yara', 'YARA Rules'),
         ('asn', 'AS Numbers'),
         ('jwt', 'JWT Tokens'),
+        ('cert_serials', 'Certificate Serial Numbers'),
     ]
 
     def _format_hashes_section(self, data: List[Union[str, Dict[str, str]]]) -> List[str]:
@@ -245,9 +247,7 @@ class TextFormatter(OutputFormatter):
             output_file: Path to the output file
         """
         try:
-            # Create directory if it doesn't exist
-            Path(output_file).resolve().parent.mkdir(parents=True, exist_ok=True)
-
+            self._ensure_directory(output_file)
             with Path(output_file).open('w', encoding='utf-8') as f:
                 f.write(self.format())
         except Exception as e:

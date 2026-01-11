@@ -7,10 +7,11 @@ Includes additional IOC types and improved extraction methods.
 Author: Marc Rivero | @seifreed
 """
 
+import json
 import re
 import urllib.parse
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Pattern, Set, Tuple, Union
+from typing import Callable, ClassVar, Dict, Iterable, List, Optional, Pattern, Set, Tuple, Union
 
 from tqdm import tqdm
 
@@ -24,13 +25,38 @@ IPv4_PARTS_COUNT = 4
 IPv4_MAX_OCTET = 255
 MIN_HOSTNAME_LENGTH = 3
 LARGE_TEXT_THRESHOLD = 10000
-MAX_URL_CONTENT_LINES = 5
 
 logger = get_logger(__name__)
 
 
 class IOCExtractor:
     """Enhanced class for extracting different types of IOCs from text."""
+
+    FILE_SHARING_SITES: ClassVar[Set[str]] = {
+        'pastebin.com', 'paste.ee', 'hastebin.com', 'gist.github.com',
+        'drive.google.com', 'docs.google.com', 'dropbox.com', 'box.com',
+        'mediafire.com', 'mega.nz', 'wetransfer.com', 'sendspace.com',
+        'discord.com', 'discord.gg', 'telegram.me', 't.me',
+        'transfer.sh', 'file.io', 'anonfiles.com', 'bayfiles.com',
+    }
+
+    SUSPICIOUS_PATH_KEYWORDS: ClassVar[List[str]] = [
+        'malware', 'exploit', 'payload', 'shellcode', 'backdoor',
+        'c2', 'c&c', 'rat', 'trojan', 'ransomware', 'crypter',
+        'loader', 'dropper', 'injector', 'rootkit', 'keylogger',
+        'stealer', 'miner', 'botnet', 'virus', 'worm',
+        'hack', 'crack', 'keygen', 'poc', 'cve-',
+        'vulnerability', 'pentest', 'redteam', 'bypass',
+        'mimikatz', 'cobalt', 'empire', 'metasploit', 'dsefix',
+    ]
+
+    DOCUMENTATION_DOMAINS: ClassVar[List[str]] = [
+        'docs.microsoft.com', 'learn.microsoft.com', 'support.microsoft.com',
+        'developer.apple.com', 'support.apple.com', 'help.apple.com',
+        'developers.google.com', 'support.google.com', 'cloud.google.com/docs',
+        'docs.aws.amazon.com', 'docs.oracle.com', 'docs.python.org',
+        'developer.mozilla.org', 'stackoverflow.com', 'serverfault.com',
+    ]
 
     def __init__(self, defang: bool = True) -> None:
         """
@@ -43,6 +69,11 @@ class IOCExtractor:
 
         # Load valid TLDs
         self.valid_tlds: Set[str] = self._load_valid_tlds()
+
+        # Load legitimate domains from JSON file
+        self.legitimate_domains: Set[str] = set()
+        self.legitimate_with_subdomains: Set[str] = set()
+        self._load_legitimate_domains()
 
         # Define regex patterns for all IOC types
         self.patterns: Dict[str, Pattern[str]] = {
@@ -112,7 +143,7 @@ class IOCExtractor:
             'registry': re.compile(
                 r'\b((?:HKEY_LOCAL_MACHINE|HKLM|HKEY_CURRENT_USER|HKCU|'
                 r'HKEY_CLASSES_ROOT|HKCR|HKEY_USERS|HKU|'
-                r'HKEY_CURRENT_CONFIG|HKCC)\\[\\A-Za-z0-9-_\s]+)\b',
+                r'HKEY_CURRENT_CONFIG|HKCC)\\[\\A-Za-z0-9-_\s]+?)(?=\s|$)',
             ),
             'mutex': re.compile(
                 r'\b(?:Global\\|Local\\)?[A-Za-z0-9][A-Za-z0-9_\-]{2,}(?:Mutex|MUTEX)\b|'
@@ -122,14 +153,14 @@ class IOCExtractor:
                 r'\b(?:Service|SERVICE):\s*([A-Za-z0-9][A-Za-z0-9_\-]{2,})\b|'
                 r'\b([A-Za-z0-9][A-Za-z0-9_\-]{2,})(?:Service|Svc)\b',
             ),
-            'named_pipes': re.compile(r'\\\\\\.\\pipe\\[A-Za-z0-9_\-]+'),
+            'named_pipes': re.compile(r'\\\\\.\\pipe\\[A-Za-z0-9_\-]+'),
 
             # File indicators
             'filenames': re.compile(
-                r'\b([A-Za-z0-9][A-Za-z0-9-_\.]{2,})\.'
-                r'(exe|dll|bat|sys|htm|html|js|jar|jpg|png|vb|scr|pif|chm|'
+                r'\b([A-Za-z0-9][A-Za-z0-9-_\.]{2,}\.'
+                r'(?:exe|dll|bat|sys|htm|html|js|jar|jpg|png|vb|scr|pif|chm|'
                 r'zip|rar|cab|pdf|doc|docx|ppt|pptx|xls|xlsx|swf|gif|'
-                r'ps1|vbs|wsf|hta|cmd|com|lnk|ini|inf|reg)\b',
+                r'ps1|vbs|wsf|hta|cmd|com|lnk|ini|inf|reg))\b',
                 re.IGNORECASE,
             ),
             'filepaths': re.compile(
@@ -173,18 +204,6 @@ class IOCExtractor:
             'img', 'vhd', 'vmdk',
         }
 
-        # Malware keywords
-        self.malware_keywords: Set[str] = {
-            'trojan', 'virus', 'worm', 'backdoor', 'rootkit', 'spyware',
-            'adware', 'ransomware', 'malware', 'agent', 'dropper',
-            'downloader', 'injector', 'stealer', 'keylogger', 'generic',
-            'heur', 'suspicious', 'riskware', 'unwanted', 'pup', 'pua',
-            'hacktool', 'exploit', 'obfuscated', 'packed', 'crypted',
-            'banker', 'win32', 'win64', 'msil', 'android', 'linux',
-            'macos', 'ios', 'symbian', 'unix', 'emotet', 'trickbot',
-            'cobalt', 'mimikatz', 'lazarus', 'apt',
-        }
-
     def _load_valid_tlds(self) -> Set[str]:
         """
         Load the list of valid TLDs.
@@ -219,6 +238,25 @@ class IOCExtractor:
                 logger.debug("Failed to load TLD list from file")
 
         return common_tlds
+
+    def _load_legitimate_domains(self) -> None:
+        """Load legitimate domains from JSON file."""
+        domains_file = Path(__file__).parent / 'data' / 'legitimate_domains.json'
+        if domains_file.exists():
+            try:
+                with domains_file.open(encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.legitimate_domains = set(data.get('legitimate_domains', []))
+                    self.legitimate_with_subdomains = set(
+                        data.get('legitimate_with_subdomains', [])
+                    )
+                    return
+            except Exception:
+                logger.debug("Failed to load legitimate domains from file")
+
+        # Fallback to empty sets - will use hardcoded values in _is_valid_domain
+        self.legitimate_domains = set()
+        self.legitimate_with_subdomains = set()
 
     def _extract_pattern(
         self,
@@ -338,51 +376,16 @@ class IOCExtractor:
             if part.lower() in programming_keywords:
                 return False
 
-        # IMPORTANT: Exclude well-known legitimate domains unless they're subdomains
-        # These should only appear if there's a specific malicious URL, not just mentioned
-        legitimate_domains = {
-            'github.com', 'microsoft.com', 'google.com', 'facebook.com', 'twitter.com',
-            'linkedin.com', 'youtube.com', 'wikipedia.org', 'amazon.com', 'apple.com',
-            'stackoverflow.com', 'adobe.com', 'oracle.com', 'mozilla.org', 'apache.org',
-            'wordpress.com', 'cloudflare.com', 'akamai.com', 'fastly.com', 'debian.org',
-            'ubuntu.com', 'redhat.com', 'centos.org', 'python.org', 'nodejs.org',
-            'npmjs.com', 'pypi.org', 'rubygems.org', 'docker.com', 'kubernetes.io',
-            'microsoft.net', 'live.com', 'office.com', 'outlook.com', 'skype.com',
-            'bing.com', 'yahoo.com', 'yandex.ru', 'baidu.com', 'duckduckgo.com',
-            'reddit.com', 'instagram.com', 'whatsapp.com', 'telegram.org', 'slack.com',
-            'zoom.us', 'dropbox.com', 'box.com', 'salesforce.com', 'atlassian.com',
-            'jetbrains.com', 'visualstudio.com', 'eclipse.org', 'sourceforge.net',
-            'gnu.org', 'kernel.org', 'w3.org', 'ietf.org', 'ieee.org',
-            'cisco.com', 'vmware.com', 'ibm.com', 'intel.com', 'amd.com',
-            'nvidia.com', 'dell.com', 'hp.com', 'lenovo.com', 'asus.com',
-            'kaspersky.com', 'symantec.com', 'mcafee.com', 'trendmicro.com', 'avast.com',
-            'bitdefender.com', 'eset.com', 'sophos.com', 'paloaltonetworks.com', 'fortinet.com',
-            'fireeye.com', 'crowdstrike.com', 'sentinelone.com', 'carbonblack.com', 'cylance.com',
-            'virustotal.com', 'hybrid-analysis.com', 'malwarebytes.com', 'spamhaus.org', 'sans.org',
-            'mitre.org', 'cve.mitre.org', 'nvd.nist.gov', 'us-cert.gov', 'cert.org',
-            'shodan.io', 'censys.io', 'zoomeye.org', 'riskiq.com', 'domaintools.com',
-            'alibabacloud.com', 'aws.amazon.com', 'azure.microsoft.com',
-            'cloud.google.com', 'digitalocean.com',
-            'godaddy.com', 'namecheap.com', 'squarespace.com', 'wix.com',
-            'habr.com', 'medium.com', 'dev.to', 'hashnode.com', 'blogger.com',
-        }
-
-        # Also check with 'learn.' or other common subdomains of legitimate sites
-        legitimate_with_subdomains = {
-            'learn.microsoft.com', 'docs.microsoft.com', 'support.microsoft.com',
-            'developer.mozilla.org', 'wiki.debian.org', 'help.ubuntu.com',
-            'access.redhat.com', 'bugzilla.redhat.com', 'git.kernel.org',
-        }
-
         domain_lower = domain.lower()
 
         # If it's a known legitimate domain, exclude it
-        if domain_lower in legitimate_domains or domain_lower in legitimate_with_subdomains:
+        if (domain_lower in self.legitimate_domains or
+            domain_lower in self.legitimate_with_subdomains):
             return False
 
         # If it's a subdomain of a legitimate domain but looks suspicious, keep it
         # For example: malware.github.com or c2.microsoft.com would be kept
-        for legit in legitimate_domains:
+        for legit in self.legitimate_domains:
             if domain_lower.endswith('.' + legit):
                 # Check if the subdomain part looks suspicious
                 subdomain = domain_lower.replace('.' + legit, '')
@@ -404,29 +407,17 @@ class IOCExtractor:
 
         return domain_length_valid and parts_length_valid and has_min_parts
 
-    def _defang_domain(self, domain: str) -> str:
+    def _defang_dotted(self, value: str) -> str:
         """
-        Defang a domain by replacing dots.
+        Defang a dotted value (domain or IP) by replacing dots with [.].
 
         Args:
-            domain: Domain to defang
+            value: Domain or IP address to defang
 
         Returns:
-            Defanged domain
+            Defanged value
         """
-        return domain.replace('.', '[.]')
-
-    def _defang_ip(self, ip: str) -> str:
-        """
-        Defang an IP address.
-
-        Args:
-            ip: IP address to defang
-
-        Returns:
-            Defanged IP
-        """
-        return ip.replace('.', '[.]')
+        return value.replace('.', '[.]')
 
     def _defang_url(self, url: str) -> str:
         """
@@ -438,9 +429,20 @@ class IOCExtractor:
         Returns:
             Defanged URL
         """
-        return (url.replace('http://', 'hxxp://')
-                   .replace('https://', 'hxxps://')
-                   .replace('.', '[.]'))
+        defanged = url.replace('http://', 'hxxp://').replace('https://', 'hxxps://')
+        return self._defang_dotted(defanged)
+
+    def _clean_defanged(self, value: str) -> str:
+        """
+        Clean defanged notation from a value (domain or IP).
+
+        Args:
+            value: Defanged value to clean
+
+        Returns:
+            Cleaned value with standard dots
+        """
+        return value.replace('[.]', '.').replace('(.)', '.').replace('{.}', '.')
 
     def _extract_domains_from_urls(self, text: str) -> List[str]:
         """
@@ -472,26 +474,36 @@ class IOCExtractor:
 
         return domains
 
+    def _extract_hash(self, text: str, hash_type: str) -> List[str]:
+        """
+        Extract hashes of a specific type from text.
+
+        Args:
+            text: Text to search in
+            hash_type: Type of hash pattern to use (md5, sha1, sha256, sha512)
+
+        Returns:
+            List of valid hashes
+        """
+        candidates = self._extract_pattern(text, hash_type)
+        return [h for h in candidates if self._is_valid_hash_pattern(h)]
+
     # Extraction methods for each IOC type
     def extract_md5(self, text: str) -> List[str]:
         """Extract MD5 hashes from text."""
-        candidates = self._extract_pattern(text, 'md5')
-        return [h for h in candidates if self._is_valid_hash_pattern(h)]
+        return self._extract_hash(text, 'md5')
 
     def extract_sha1(self, text: str) -> List[str]:
         """Extract SHA1 hashes from text."""
-        candidates = self._extract_pattern(text, 'sha1')
-        return [h for h in candidates if self._is_valid_hash_pattern(h)]
+        return self._extract_hash(text, 'sha1')
 
     def extract_sha256(self, text: str) -> List[str]:
         """Extract SHA256 hashes from text."""
-        candidates = self._extract_pattern(text, 'sha256')
-        return [h for h in candidates if self._is_valid_hash_pattern(h)]
+        return self._extract_hash(text, 'sha256')
 
     def extract_sha512(self, text: str) -> List[str]:
         """Extract SHA512 hashes from text."""
-        candidates = self._extract_pattern(text, 'sha512')
-        return [h for h in candidates if self._is_valid_hash_pattern(h)]
+        return self._extract_hash(text, 'sha512')
 
     def extract_ssdeep(self, text: str) -> List[str]:
         """Extract ssdeep hashes from text."""
@@ -506,12 +518,11 @@ class IOCExtractor:
         clean_domains = []
 
         for domain in all_domains:
-            # Clean existing defanging
-            clean_domain = domain.replace('[.]', '.').replace('(.)', '.').replace('{.}', '.')
+            clean_domain = self._clean_defanged(domain)
 
             if self._is_valid_domain(clean_domain):
                 if self.defang:
-                    clean_domain = self._defang_domain(clean_domain)
+                    clean_domain = self._defang_dotted(clean_domain)
                 clean_domains.append(clean_domain)
 
         return list(set(clean_domains))
@@ -522,32 +533,34 @@ class IOCExtractor:
         clean_ips = []
 
         for ip in ips:
-            # Clean existing defanging
-            clean_ip = ip.replace('[.]', '.').replace('(.)', '.').replace('{.}', '.')
-            clean_ip = re.sub(r'[\[\(\{]\.[\]\)\}]', '.', clean_ip)  # Handle other defang patterns
-            
+            clean_ip = self._clean_defanged(ip)
+            # Handle additional defang patterns like [.] with brackets
+            clean_ip = re.sub(r'[\[\(\{]\.[\]\)\}]', '.', clean_ip)
+
             # Validate IP
             parts = clean_ip.split('.')
-            if len(parts) == IPv4_PARTS_COUNT:
-                try:
-                    valid = True
-                    for part in parts:
-                        # Check for leading zeros (except "0" itself)
-                        if len(part) > 1 and part[0] == '0':
-                            valid = False
-                            break
-                        # Check range 0-255
-                        num = int(part)
-                        if not (0 <= num <= IPv4_MAX_OCTET):
-                            valid = False
-                            break
-                    
-                    if valid:
-                        if self.defang:
-                            clean_ip = self._defang_ip(clean_ip)
-                        clean_ips.append(clean_ip)
-                except ValueError:
-                    continue
+            if len(parts) != IPv4_PARTS_COUNT:
+                continue
+
+            try:
+                valid = True
+                for part in parts:
+                    # Check for leading zeros (except "0" itself)
+                    if len(part) > 1 and part[0] == '0':
+                        valid = False
+                        break
+                    # Check range 0-255
+                    num = int(part)
+                    if not (0 <= num <= IPv4_MAX_OCTET):
+                        valid = False
+                        break
+
+                if valid:
+                    if self.defang:
+                        clean_ip = self._defang_dotted(clean_ip)
+                    clean_ips.append(clean_ip)
+            except ValueError:
+                continue
 
         return list(set(clean_ips))
 
@@ -555,85 +568,55 @@ class IOCExtractor:
         """Extract IPv6 addresses from text."""
         return self._extract_pattern(text, 'ipv6')
 
+    def _is_file_sharing_url(self, domain: str) -> bool:
+        """Check if domain belongs to a file sharing service."""
+        return any(site in domain for site in self.FILE_SHARING_SITES)
+
+    def _is_suspicious_url(self, domain: str, path: str) -> bool:
+        """Check if URL path contains suspicious keywords for code hosting sites."""
+        if not ('github.com' in domain or 'gitlab.com' in domain or 'bitbucket.org' in domain):
+            return False
+        return any(keyword in path for keyword in self.SUSPICIOUS_PATH_KEYWORDS)
+
+    def _should_exclude_url(self, domain: str, path: str) -> bool:
+        """Determine if URL should be excluded from results."""
+        if not any(doc_domain in domain for doc_domain in self.DOCUMENTATION_DOMAINS):
+            return False
+
+        suspicious_terms = ['exploit', 'vulnerability', 'cve-', 'poc', 'bypass']
+        return not any(term in path for term in suspicious_terms)
+
+    def _append_url(self, clean_urls: List[str], url: str) -> None:
+        """Append URL to list, applying defanging if enabled."""
+        if self.defang:
+            clean_urls.append(self._defang_url(url))
+        else:
+            clean_urls.append(url)
+
     def extract_urls(self, text: str) -> List[str]:
         """Extract URLs from text, intelligently filtering based on context."""
         urls = self._extract_pattern(text, 'urls')
-        clean_urls = []
+        clean_urls: List[str] = []
 
         for url in urls:
             try:
-                # Clean defanging to parse
-                clean_for_parse = url.replace('[.]', '.').replace('hxxp', 'http')
-                from urllib.parse import urlparse
-                parsed = urlparse(clean_for_parse)
+                clean_for_parse = self._clean_defanged(url).replace('hxxp', 'http')
+                parsed = urllib.parse.urlparse(clean_for_parse)
                 domain = parsed.netloc.lower()
                 path = parsed.path.lower()
 
-                # Always keep URLs from these potentially dangerous sites
-                file_sharing_sites = {
-                    'pastebin.com', 'paste.ee', 'hastebin.com', 'gist.github.com',
-                    'drive.google.com', 'docs.google.com', 'dropbox.com', 'box.com',
-                    'mediafire.com', 'mega.nz', 'wetransfer.com', 'sendspace.com',
-                    'discord.com', 'discord.gg', 'telegram.me', 't.me',
-                    'transfer.sh', 'file.io', 'anonfiles.com', 'bayfiles.com',
-                }
-
-                # Always keep if it's a file sharing site
-                if any(site in domain for site in file_sharing_sites):
-                    if self.defang:
-                        clean_urls.append(self._defang_url(url))
-                    else:
-                        clean_urls.append(url)
+                if self._is_file_sharing_url(domain):
+                    self._append_url(clean_urls, url)
+                elif self._is_suspicious_url(domain, path):
+                    self._append_url(clean_urls, url)
+                elif 'github.com' in domain or 'gitlab.com' in domain or 'bitbucket.org' in domain:
                     continue
-
-                # For GitHub/GitLab, keep if path suggests malicious content
-                if 'github.com' in domain or 'gitlab.com' in domain or 'bitbucket.org' in domain:
-                    suspicious_path_keywords = [
-                        'malware', 'exploit', 'payload', 'shellcode', 'backdoor',
-                        'c2', 'c&c', 'rat', 'trojan', 'ransomware', 'crypter',
-                        'loader', 'dropper', 'injector', 'rootkit', 'keylogger',
-                        'stealer', 'miner', 'botnet', 'virus', 'worm',
-                        'hack', 'crack', 'keygen', 'poc', 'cve-',
-                        'vulnerability', 'pentest', 'redteam', 'bypass',
-                    ]
-                    # Keep if path contains suspicious keywords
-                    suspicious_tools = ['mimikatz', 'cobalt', 'empire', 'metasploit', 'dsefix']
-                    if (any(keyword in path for keyword in suspicious_path_keywords) or
-                        any(tool in path for tool in suspicious_tools)):
-                        if self.defang:
-                            clean_urls.append(self._defang_url(url))
-                        else:
-                            clean_urls.append(url)
+                elif self._should_exclude_url(domain, path):
                     continue
-
-                # Skip pure documentation/support URLs from major vendors
-                documentation_domains = [
-                    'docs.microsoft.com', 'learn.microsoft.com', 'support.microsoft.com',
-                    'developer.apple.com', 'support.apple.com', 'help.apple.com',
-                    'developers.google.com', 'support.google.com', 'cloud.google.com/docs',
-                    'docs.aws.amazon.com', 'docs.oracle.com', 'docs.python.org',
-                    'developer.mozilla.org', 'stackoverflow.com', 'serverfault.com',
-                ]
-
-                if any(doc_domain in domain for doc_domain in documentation_domains):
-                    # Skip unless path contains suspicious elements
-                    suspicious_terms = ['exploit', 'vulnerability', 'cve-', 'poc', 'bypass']
-                    if not any(susp in path for susp in suspicious_terms):
-                        continue
-
-                # For all other URLs, keep them if they're not obviously benign
-                if domain and not domain.endswith(('.png', '.jpg', '.gif', '.css', '.js')):
-                    if self.defang:
-                        clean_urls.append(self._defang_url(url))
-                    else:
-                        clean_urls.append(url)
-
+                elif domain and not domain.endswith(('.png', '.jpg', '.gif', '.css', '.js')):
+                    self._append_url(clean_urls, url)
             except Exception:
-                # If parsing fails, keep the URL
-                if self.defang:
-                    clean_urls.append(self._defang_url(url))
-                else:
-                    clean_urls.append(url)
+                self._append_url(clean_urls, url)
 
         return list(set(clean_urls))
 
@@ -721,20 +704,7 @@ class IOCExtractor:
             if match.lower() not in legitimate_processes
         ]
 
-        # Focus on files mentioned in security/threat context or with suspicious characteristics
-        final_matches = []
-        for match in filtered_matches:
-            # Malware-related files
-            if any(keyword in match.lower() for keyword in [
-                'throttle', 'blood', 'haz8', 'all.exe', 'mimikatz', 'ransomware',
-            ]) or any(av in match.lower() for av in [
-                'avast', 'avg', 'bd', 'csfalcon', 'eset', 'kaspersky', 'mcafee',
-                'sentinel', 'sophos', 'symantec', 'panda',
-            ]) or (len([c for c in match if c.isdigit()]) >= 1 and
-                  any(ext in match.lower() for ext in ['.exe', '.dll', '.sys'])):
-                final_matches.append(match)
-
-        return list(set(final_matches))[:30]  # Reduced limit for quality
+        return list(set(filtered_matches))
 
     def extract_filepaths(self, text: str) -> List[str]:
         """Extract file paths from text with validation."""
@@ -747,14 +717,14 @@ class IOCExtractor:
             clean_path = path.strip()
 
             # Must be reasonable length and structure
-            if (20 < len(clean_path) < 300 and
+            if (len(clean_path) >= 10 and len(clean_path) < 300 and
                 ('\\' in clean_path or '/' in clean_path) and
                 not any(word in clean_path.lower() for word in [
                     'folder on the', 'uploaded to', 'artifacts were', 'initially',
                 ])):
                 # Clean up and validate path
                 clean_part = clean_path.rstrip('",;\'"').strip()
-                
+
                 # Check if it's a valid Windows path (drive letter or env var)
                 if (':\\' in clean_part or clean_part.startswith('%')):
                     valid_paths.append(clean_part)

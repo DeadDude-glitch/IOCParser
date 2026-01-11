@@ -93,22 +93,24 @@ class UnsupportedFileTypeError(ValidationError):
         super().__init__(f"Unsupported file type: {file_path}")
 
 
-class NetworkDownloadError(NetworkError):
-    """Exception raised for network download failures."""
+class DownloadError(NetworkError):
+    """Exception raised for download failures."""
 
-    def __init__(self, url: str, reason: str) -> None:
+    def __init__(self, url: str, reason: str, error_type: str = "network") -> None:
         self.url = url
         self.reason = reason
-        super().__init__(f"Failed to download {url}: {reason}")
+        self.error_type = error_type
+        prefix = "Unexpected error" if error_type == "unexpected" else "Failed to"
+        super().__init__(f"{prefix} download {url}: {reason}")
 
 
-class UnexpectedDownloadError(NetworkError):
-    """Exception raised for unexpected download errors."""
+# Aliases for backward compatibility
+NetworkDownloadError = DownloadError
 
-    def __init__(self, url: str, reason: str) -> None:
-        self.url = url
-        self.reason = reason
-        super().__init__(f"Unexpected error downloading {url}: {reason}")
+
+def UnexpectedDownloadError(url: str, reason: str) -> DownloadError:
+    """Create a DownloadError with unexpected error type (for backward compatibility)."""
+    return DownloadError(url, reason, error_type="unexpected")
 
 
 class FileProcessingError(FileParsingError):

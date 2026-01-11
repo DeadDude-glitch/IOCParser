@@ -11,7 +11,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import pdfplumber
-import pdfplumber.pdf
 import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
@@ -70,13 +69,11 @@ class PDFParser(FileParser):
 
         try:
             with pdfplumber.open(self.file_path) as pdf:
-                # Cast to specific type instead of Any
-                pdf_obj = pdf  # MyPy can infer the correct type from context
-                total_pages: int = len(pdf_obj.pages)
+                total_pages: int = len(pdf.pages)
 
                 # Use tqdm to show progress
                 for page_num in tqdm(range(total_pages), desc="Processing pages"):
-                    page = pdf_obj.pages[page_num]
+                    page = pdf.pages[page_num]
                     page_text: str = str(page.extract_text() or "")
                     text_content += page_text
 
@@ -146,7 +143,14 @@ class HTMLParser(FileParser):
             raise HTMLProcessingError(str(e)) from e
 
 
-# Function to determine the file type and return the appropriate parser
+# Extension to parser mapping
+EXTENSION_PARSERS: dict[str, type[FileParser]] = {
+    '.pdf': PDFParser,
+    '.html': HTMLParser,
+    '.htm': HTMLParser,
+}
+
+
 def get_parser(file_path: str) -> FileParser:
     """
     Determine the file type and return the appropriate parser.
@@ -157,15 +161,13 @@ def get_parser(file_path: str) -> FileParser:
     Returns:
         The appropriate parser for the file type
     """
-    # If it's a URL, determine the type by extension or assume HTML
+    # Check extension against known parsers
+    for ext, parser_class in EXTENSION_PARSERS.items():
+        if file_path.endswith(ext):
+            return parser_class(file_path)
+
+    # For URLs without recognized extension, default to HTML
     if file_path.startswith(('http://', 'https://')):
-        if file_path.endswith('.pdf'):
-            return PDFParser(file_path)
         return HTMLParser(file_path)
 
-    # For local files, determine by extension
-    if file_path.endswith('.pdf'):
-        return PDFParser(file_path)
-    if file_path.endswith(('.html', '.htm')):
-        return HTMLParser(file_path)
     raise UnsupportedFileTypeError(file_path)

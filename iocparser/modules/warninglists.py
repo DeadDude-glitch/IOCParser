@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union, cast
+from typing import ClassVar, Dict, List, Optional, Set, Tuple, Union, cast
 from urllib.parse import urlparse
 
 import requests
@@ -33,6 +33,58 @@ logger = get_logger(__name__)
 
 class MISPWarningLists:
     """Class for managing MISP warning lists to detect false positives"""
+
+    # Type alias for warning response
+    WarningInfo = Dict[str, str]
+
+    # Consolidated IOC type mapping used across the class
+    IOC_TYPE_MAPPING: ClassVar[Dict[str, str]] = {
+        'domain': 'domains',
+        'hostname': 'domains',
+        'fqdn': 'domains',
+        'ip': 'ips',
+        'ipv4': 'ips',
+        'ipv6': 'ipv6',
+        'url': 'urls',
+        'uri': 'urls',
+        'email': 'emails',
+        'md5': 'md5',
+        'sha1': 'sha1',
+        'sha256': 'sha256',
+        'sha512': 'sha512',
+        'cve': 'cves',
+    }
+
+    # MISP attribute types for each IOC type
+    MISP_TYPE_MAPPING: ClassVar[Dict[str, List[str]]] = {
+        'domains': ['hostname', 'domain', 'domain|ip', 'fqdn'],
+        'urls': ['url', 'uri', 'link', 'uri-path'],
+        'emails': ['email', 'email-src', 'email-dst', 'target-email',
+                   'email-address', 'email-subject'],
+        'cves': ['vulnerability', 'cve', 'weakness'],
+        'mitre_attack': ['mitre-attack-pattern', 'attack-pattern', 'technique'],
+    }
+
+    # Keywords for relevance checking by IOC type
+    TYPE_KEYWORDS: ClassVar[Dict[str, List[str]]] = {
+        'ips': ['ip', 'address', 'ipv4', 'ipv6', 'cidr'],
+        'domains': ['domain', 'hostname', 'fqdn', 'dns'],
+        'urls': ['url', 'uri', 'link'],
+        'emails': ['email', 'mail'],
+        'cves': ['cve', 'vulnerability'],
+    }
+
+    # Defanging cleaners for URL/domain normalization
+    DEFANG_CLEANERS: ClassVar[List[Tuple[str, str]]] = [
+        ('[.]', '.'), ('(.)', '.'), ('{.}', '.'),
+        ('[:]', ':'), ('(:)', ':'), ('{:}', ':'),
+        ('[@]', '@'), ('[@ ]', '@'), ('(@)', '@'), ('{@}', '@'),
+        ('[//]', '//'), ('{//}', '//'),
+        ('[/]', '/'), ('{/}', '/'),
+        ('hxxp://', 'http://'), ('hxxps://', 'https://'),
+        ('hXXp://', 'http://'), ('hXXps://', 'https://'),
+        ('h__p://', 'http://'), ('h__ps://', 'https://'),
+    ]
 
     def __init__(self, cache_duration: int = 24, force_update: bool = False) -> None:
         """
@@ -147,6 +199,14 @@ class MISPWarningLists:
             with self.cache_metadata_file.open('w') as f:
                 json.dump(cache_data, f)
 
+            # Report failed downloads
+            if failed_downloads:
+                logger.warning(
+                    f"Failed to download {len(failed_downloads)} warning lists: "
+                    f"{', '.join(failed_downloads[:10])}"
+                    f"{' ...' if len(failed_downloads) > 10 else ''}"
+                )
+
             logger.info(f"Successfully updated {len(self.warning_lists)} MISP warning lists")
 
         except Exception:
@@ -162,10 +222,20 @@ class MISPWarningLists:
                 except Exception:
                     logger.exception("Could not load warning lists from cache")
 
+    def _clear_preprocessed_data(self) -> None:
+        """Clear all preprocessed data structures"""
+        self.string_lookups.clear()
+        self.compiled_regex.clear()
+        self.cidr_networks.clear()
+        self.lists_by_ioc_type.clear()
+
     def _preprocess_lists(self) -> None:
         """Pre-process warning lists for optimized lookups"""
         logger.info("Pre-processing warning lists for optimized lookups...")
-        
+
+        # Clear existing preprocessed data first
+        self._clear_preprocessed_data()
+
         for list_id, warning_list in self.warning_lists.items():
             list_type = str(warning_list.get('type', 'string'))
             values_val = warning_list.get('list', [])
@@ -214,26 +284,8 @@ class MISPWarningLists:
             if isinstance(matching_attrs, list):
                 for attr in matching_attrs:
                     attr_str = str(attr) if isinstance(attr, str) else str(attr.get('name', ''))
-                    
-                    # Map attributes to IOC types
-                    ioc_type_mapping = {
-                        'domain': 'domains',
-                        'hostname': 'domains',
-                        'fqdn': 'domains',
-                        'ip': 'ips',
-                        'ipv4': 'ips',
-                        'ipv6': 'ipv6',
-                        'url': 'urls',
-                        'uri': 'urls',
-                        'email': 'emails',
-                        'md5': 'md5',
-                        'sha1': 'sha1',
-                        'sha256': 'sha256',
-                        'sha512': 'sha512',
-                        'cve': 'cves',
-                    }
-                    
-                    for keyword, ioc_type in ioc_type_mapping.items():
+
+                    for keyword, ioc_type in self.IOC_TYPE_MAPPING.items():
                         if keyword in attr_str.lower():
                             if ioc_type not in self.lists_by_ioc_type:
                                 self.lists_by_ioc_type[ioc_type] = []
@@ -253,34 +305,32 @@ class MISPWarningLists:
         Returns:
             Cleaned value
         """
-        cleaners: List[Tuple[str, str]] = [
-            ('[.]', '.'), ('(.)', '.'), ('{.}', '.'),
-            ('[:]', ':'), ('(:)', ':'), ('{:}', ':'),
-            ('[@ ]', '@'), ('(@)', '@'), ('{@}', '@'),
-            ('[//]', '//'), ('{//}', '//'),
-            ('[/]', '/'), ('{/}', '/'),
-            ('hxxp://', 'http://'), ('hxxps://', 'https://'),
-            ('hXXp://', 'http://'), ('hXXps://', 'https://'),
-            ('h__p://', 'http://'), ('h__ps://', 'https://'),
-        ]
-
         clean_value: str = value
-        for old, new in cleaners:
+        for old, new in self.DEFANG_CLEANERS:
             clean_value = clean_value.replace(old, new)
 
         return clean_value
 
-    def _get_misp_types_for_ioc(self, ioc_type: str) -> List[str]:
-        """Get MISP attribute types for a given IOC type."""
-        type_mapping = {
-            'domains': ['hostname', 'domain', 'domain|ip', 'fqdn'],
-            'urls': ['url', 'uri', 'link', 'uri-path'],
-            'emails': ['email', 'email-src', 'email-dst', 'target-email',
-                      'email-address', 'email-subject'],
-            'cves': ['vulnerability', 'cve', 'weakness'],
-            'mitre_attack': ['mitre-attack-pattern', 'attack-pattern', 'technique'],
+    def _build_warning_response(
+        self, warning_list: WarningListDict, list_id: str,
+    ) -> 'MISPWarningLists.WarningInfo':
+        """
+        Build a standardized warning response dictionary.
+
+        Args:
+            warning_list: The warning list dictionary
+            list_id: The list identifier
+
+        Returns:
+            Dictionary with 'name' and 'description' keys
+        """
+        return {
+            'name': str(warning_list.get('name', list_id)),
+            'description': str(warning_list.get('description', '')),
         }
 
+    def _get_misp_types_for_ioc(self, ioc_type: str) -> List[str]:
+        """Get MISP attribute types for a given IOC type."""
         # Special handling for IPs
         if ioc_type in ['ips', 'ipv6']:
             return ['ip-src', 'ip-dst', 'ip-src|port', 'ip-dst|port',
@@ -296,7 +346,7 @@ class MISPWarningLists:
             return ['btc', 'bitcoin', 'cryptocurrency', ioc_type,
                    'crypto-address', 'xmr', 'eth']
 
-        return type_mapping.get(ioc_type, [ioc_type, 'other', 'text'])
+        return self.MISP_TYPE_MAPPING.get(ioc_type, [ioc_type, 'other', 'text'])
 
     def _check_against_warning_list(
         self,
@@ -306,12 +356,6 @@ class MISPWarningLists:
         list_id: str,
     ) -> Optional[Dict[str, str]]:
         """Check a value against a specific warning list."""
-        name_val = warning_list.get('name', list_id)
-        name = str(name_val) if name_val is not None else list_id
-
-        desc_val = warning_list.get('description', '')
-        description = str(desc_val) if desc_val is not None else ''
-
         type_val = warning_list.get('type', 'string')
         list_type = str(type_val) if type_val is not None else 'string'
 
@@ -323,11 +367,11 @@ class MISPWarningLists:
 
         # Check with original value
         if self._check_value_in_list(clean_value, values, list_type):
-            return {'name': name, 'description': description}
+            return self._build_warning_response(warning_list, list_id)
 
         # Also check the extracted domain for URLs
         if extracted_domain and self._check_value_in_list(extracted_domain, values, list_type):
-            return {'name': name, 'description': description}
+            return self._build_warning_response(warning_list, list_id)
 
         return None
 
@@ -362,58 +406,45 @@ class MISPWarningLists:
         # OPTIMIZATION: Check string lookups first (fastest)
         if clean_value_lower in self.string_lookups:
             for list_id in self.string_lookups[clean_value_lower]:
-                if list_id in relevant_list_ids:
+                if list_id in relevant_list_ids and list_id in self.warning_lists:
                     warning_list = self.warning_lists[list_id]
-                    return True, {
-                        'name': str(warning_list.get('name', list_id)),
-                        'description': str(warning_list.get('description', ''))
-                    }
-        
+                    return True, self._build_warning_response(warning_list, list_id)
+
         # Also check extracted domain for URLs
         if extracted_domain and extracted_domain.lower() in self.string_lookups:
             for list_id in self.string_lookups[extracted_domain.lower()]:
-                if list_id in relevant_list_ids:
+                if list_id in relevant_list_ids and list_id in self.warning_lists:
                     warning_list = self.warning_lists[list_id]
-                    return True, {
-                        'name': str(warning_list.get('name', list_id)),
-                        'description': str(warning_list.get('description', ''))
-                    }
+                    return True, self._build_warning_response(warning_list, list_id)
 
         # Check regex patterns (slower)
         for list_id in relevant_list_ids:
-            if list_id in self.compiled_regex:
+            if list_id in self.compiled_regex and list_id in self.warning_lists:
                 for pattern in self.compiled_regex[list_id]:
                     if pattern.search(clean_value):
                         warning_list = self.warning_lists[list_id]
-                        return True, {
-                            'name': str(warning_list.get('name', list_id)),
-                            'description': str(warning_list.get('description', ''))
-                        }
+                        return True, self._build_warning_response(warning_list, list_id)
                     if extracted_domain and pattern.search(extracted_domain):
                         warning_list = self.warning_lists[list_id]
-                        return True, {
-                            'name': str(warning_list.get('name', list_id)),
-                            'description': str(warning_list.get('description', ''))
-                        }
+                        return True, self._build_warning_response(warning_list, list_id)
 
         # Check CIDR ranges for IPs
         if ioc_type in ['ips', 'ipv6']:
             try:
                 ip_obj = ipaddress.ip_address(clean_value)
                 for list_id in relevant_list_ids:
-                    if list_id in self.cidr_networks:
+                    if list_id in self.cidr_networks and list_id in self.warning_lists:
                         for network in self.cidr_networks[list_id]:
                             if ip_obj in network:
                                 warning_list = self.warning_lists[list_id]
-                                return True, {
-                                    'name': str(warning_list.get('name', list_id)),
-                                    'description': str(warning_list.get('description', ''))
-                                }
+                                return True, self._build_warning_response(warning_list, list_id)
             except (ValueError, ipaddress.AddressValueError):
                 pass
 
         # Fallback to old method for any lists not preprocessed (substring type)
         for list_id in relevant_list_ids:
+            if list_id not in self.warning_lists:
+                continue
             warning_list = self.warning_lists[list_id]
             if warning_list.get('type') == 'substring':
                 misp_types: List[str] = self._get_misp_types_for_ioc(ioc_type)
@@ -687,57 +718,15 @@ class MISPWarningLists:
         self, name: str, description: str, ioc_type: str,
     ) -> bool:
         """Check if list is relevant based on IOC type."""
-        type_keywords: Dict[str, List[str]] = {
-            'ips': ['ip', 'address', 'ipv4', 'ipv6', 'cidr'],
-            'domains': ['domain', 'hostname', 'fqdn', 'dns'],
-            'urls': ['url', 'uri', 'link'],
-            'emails': ['email', 'mail'],
-            'cves': ['cve', 'vulnerability'],
-        }
-
-        if ioc_type not in type_keywords:
+        if ioc_type not in self.TYPE_KEYWORDS:
             return False
 
         name_lower = name.lower()
         desc_lower = description.lower()
         return any(
             keyword in name_lower or keyword in desc_lower
-            for keyword in type_keywords[ioc_type]
+            for keyword in self.TYPE_KEYWORDS[ioc_type]
         )
-
-    def _log_list_check_result(
-        self,
-        clean_value: str,
-        warning_list: WarningListDict,
-        list_id: str,
-        values: List[IOCValue],
-    ) -> None:
-        """Log the result of checking a value against a warning list."""
-        name = warning_list.get('name', list_id)
-        list_type = warning_list.get('type', 'string')
-        matching_attrs = warning_list.get('matching_attributes', [])
-
-        logger.info(f"\nChecking list: {name}")
-        logger.info(f"  Type: {list_type}")
-        logger.info(f"  Matching attributes: {matching_attrs}")
-        logger.info(f"  Number of values: {len(values)}")
-
-        list_type_str = str(list_type) if list_type is not None else 'string'
-        if self._check_value_in_list(clean_value, values, list_type_str):
-            logger.info("  ✓ VALUE FOUND IN THIS LIST")
-            if list_type == 'string':
-                self._log_matched_value(clean_value, values)
-        else:
-            logger.info("  ✗ Value not in this list")
-            if values:
-                logger.info(f"    Sample values: {values[:3]}")
-
-    def _log_matched_value(self, clean_value: str, values: List[IOCValue]) -> None:
-        """Log which specific entry matched."""
-        for v in values:
-            if str(v).lower() == clean_value.lower():
-                logger.info(f"    Matched: {v}")
-                break
 
     def diagnose_value_detection(
         self,
@@ -753,6 +742,40 @@ class MISPWarningLists:
             ioc_type: The type of IOC
             expected_lists: Optional list of expected warning list names
         """
+        # Internal diagnostic helper functions (only used within this method)
+        def log_matched_value(clean_val: str, vals: List[IOCValue]) -> None:
+            """Log which specific entry matched."""
+            for v in vals:
+                if str(v).lower() == clean_val.lower():
+                    logger.info(f"    Matched: {v}")
+                    break
+
+        def log_list_check_result(
+            clean_val: str,
+            warning_list: WarningListDict,
+            list_id: str,
+            vals: List[IOCValue],
+        ) -> None:
+            """Log the result of checking a value against a warning list."""
+            name = warning_list.get('name', list_id)
+            list_type = warning_list.get('type', 'string')
+            matching_attrs = warning_list.get('matching_attributes', [])
+
+            logger.info(f"\nChecking list: {name}")
+            logger.info(f"  Type: {list_type}")
+            logger.info(f"  Matching attributes: {matching_attrs}")
+            logger.info(f"  Number of values: {len(vals)}")
+
+            list_type_str = str(list_type) if list_type is not None else 'string'
+            if self._check_value_in_list(clean_val, vals, list_type_str):
+                logger.info("  ✓ VALUE FOUND IN THIS LIST")
+                if list_type == 'string':
+                    log_matched_value(clean_val, vals)
+            else:
+                logger.info("  ✗ Value not in this list")
+                if vals:
+                    logger.info(f"    Sample values: {vals[:3]}")
+
         logger.info(f"Diagnosing detection for {value} (type: {ioc_type})")
 
         clean_value = self._clean_defanged_value(value)
@@ -784,7 +807,7 @@ class MISPWarningLists:
                 values: List[IOCValue] = [str(v) if v is not None else None for v in values_raw]
             else:
                 values = []
-            self._log_list_check_result(clean_value, warning_list, list_id, values)
+            log_list_check_result(clean_value, warning_list, list_id, values)
 
         # Final check using the main method
         in_warning_list, warning_info = self.check_value(value, ioc_type)

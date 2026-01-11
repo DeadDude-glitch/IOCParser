@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=80.9.0", "wheel>=0.45.1", "setuptools-scm[toml]>=9.2.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "iocparser-tool"
-version = "3.0.0"
+version = "4.0.0"
 description = "A tool for extracting Indicators of Compromise from security reports"
 readme = "README.md"
 license = {text = "MIT"}
@@ -22,42 +22,41 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Text Processing :: Filters",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
-    "colorama>=0.4.0",
-    "python-magic>=0.4.0",
-    "requests>=2.25.0",
-    "tqdm>=4.60.0",
-    "pdfplumber>=0.10.0",
-    "beautifulsoup4>=4.9.0",
-    "lxml>=4.6.0",
-    "regex>=2023.0.0",
-    "pdfminer.six>=20201018",
+    "colorama>=0.4.6",
+    "python-magic>=0.4.27",
+    "requests>=2.32.5",
+    "tqdm>=4.67.1",
+    "pdfplumber>=0.11.9",
+    "beautifulsoup4>=4.14.3",
+    "lxml>=6.0.2",
+    "regex>=2025.11.3",
+    "pdfminer.six==20251230",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "pytest-benchmark>=4.0",
-    "ruff>=0.1.9",
-    "mypy>=1.8.0",
-    "bandit[toml]>=1.7.6",
-    "pylint>=3.0",
-    "pre-commit>=3.5.0",
-    "types-requests",
-    "types-setuptools",
-    "types-colorama",
-    "types-tqdm",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "pytest-benchmark>=5.2.3",
+    "ruff>=0.14.11",
+    "mypy>=1.19.1",
+    "bandit[toml]>=1.9.2",
+    "pylint>=4.0.4",
+    "pre-commit>=4.5.1",
+    "types-requests>=2.32.4.20260107",
+    "types-setuptools>=80.9.0.20250822",
+    "types-colorama>=0.4.15.20250801",
+    "types-tqdm>=4.67.0.20250809",
 ]
 
 [project.urls]
@@ -77,7 +76,7 @@ iocparser = ["modules/data/*.json"]
 
 # Ruff configuration
 [tool.ruff]
-target-version = "py38"
+target-version = "py310"
 line-length = 100
 fix = true
 
@@ -148,7 +147,7 @@ max-statements = 50
 
 # MyPy configuration
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 # MAXIMUM STRICTNESS - TRUE 100% COMPLIANCE
 strict = true
 warn_return_any = true
@@ -203,7 +202,7 @@ skips = ["*/test_*.py", "*/tests/*.py"]
 
 # Pylint configuration
 [tool.pylint.main]
-py-version = "3.8"
+py-version = "3.10"
 jobs = 0
 max-line-length = 100
 disable = [
@@ -287,7 +286,7 @@ skip = ["venv", ".venv", "build", "dist"]
 # Black configuration (for compatibility if not using ruff format)
 [tool.black]
 line-length = 100
-target-version = ['py38', 'py39', 'py310', 'py311']
+target-version = ['py310', 'py311', 'py312', 'py313']
 include = '\.pyi?$'
 exclude = '''
 /(

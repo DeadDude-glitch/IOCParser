@@ -12,10 +12,7 @@ import concurrent.futures
 import logging
 import re
 import sys
-
-# Removed functools import as timeit decorator was removed for type safety
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union, cast
 from urllib.parse import ParseResult, urlparse
 
 import magic
@@ -40,6 +37,7 @@ from iocparser.modules.extractor import IOCExtractor
 from iocparser.modules.file_parser import HTMLParser, PDFParser
 from iocparser.modules.logger import get_logger, setup_logger
 from iocparser.modules.output_formatter import JSONFormatter, TextFormatter
+from iocparser.modules.utils import deduplicate_iocs
 from iocparser.modules.warninglists import MISPWarningLists
 
 # Initialize colorama only when running as a script, not when imported
@@ -58,12 +56,64 @@ MAX_FILENAME_LENGTH = 50  # Maximum filename length
 logger = get_logger(__name__)
 
 
-def get_arg(args: argparse.Namespace, attr: str) -> object:
-    """Helper to safely get argparse attributes."""
-    return cast("object", getattr(args, attr))
+def get_str_arg(args: argparse.Namespace, name: str, default: str = "") -> str:
+    """Get string argument from argparse namespace."""
+    value: object = getattr(args, name, None)
+    return str(value) if value is not None else default
 
 
-# Removed timeit decorator to avoid complex typing issues in strict mode
+def get_bool_arg(args: argparse.Namespace, name: str) -> bool:
+    """Get boolean argument from argparse namespace."""
+    value: object = getattr(args, name, False)
+    return bool(value)
+
+
+def get_int_arg(args: argparse.Namespace, name: str, default: int = 0) -> int:
+    """Get integer argument from argparse namespace."""
+    value: object = getattr(args, name, None)
+    return int(str(value)) if value is not None else default
+
+
+def get_list_arg(args: argparse.Namespace, name: str) -> list[str]:
+    """Get list argument from argparse namespace."""
+    value: object = getattr(args, name, None)
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def get_optional_str_arg(args: argparse.Namespace, name: str) -> str | None:
+    """Get optional string argument from argparse namespace."""
+    value: object = getattr(args, name, None)
+    return str(value) if value is not None else None
+
+
+class ProcessingOptions:
+    """Options for IOC extraction processing."""
+
+    def __init__(
+        self,
+        file_type: str | None = None,
+        defang: bool = True,
+        check_warnings: bool = True,
+        force_update: bool = False,
+    ) -> None:
+        self.file_type = file_type
+        self.defang = defang
+        self.check_warnings = check_warnings
+        self.force_update = force_update
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "ProcessingOptions":
+        """Create ProcessingOptions from command line arguments."""
+        return cls(
+            file_type=get_optional_str_arg(args, 'type'),
+            defang=not get_bool_arg(args, 'no_defang'),
+            check_warnings=not get_bool_arg(args, 'no_check_warnings'),
+            force_update=get_bool_arg(args, 'force_update'),
+        )
 
 
 def validate_file_size(file_path: Path, max_size: int = MAX_FILE_SIZE) -> None:
@@ -100,7 +150,7 @@ def banner() -> None:
 {Style.RESET_ALL}""")
 
 
-def detect_file_type_by_mime(file_type: str) -> Optional[str]:
+def detect_file_type_by_mime(file_type: str) -> str | None:
     """Detect file type from MIME type."""
     file_type_lower = file_type.lower()
     if "pdf" in file_type_lower:
@@ -170,7 +220,7 @@ def _validate_url(url: str) -> ParseResult:
         raise InvalidURLError(url)
     return parsed_url
 
-def _check_content_size(content_length: Optional[str]) -> None:
+def _check_content_size(content_length: str | None) -> None:
     """Check if content size exceeds limit."""
     if content_length and int(content_length) > MAX_URL_SIZE:
         raise FileSizeError(
@@ -293,7 +343,7 @@ def get_output_filename(input_source: str, is_json: bool = False) -> str:
     return f"{base_name}_iocs{extension}"
 
 
-def print_warning_lists(warnings: Dict[str, List[Dict[str, str]]]) -> None:
+def print_warning_lists(warnings: dict[str, list[dict[str, str]]]) -> None:
     """
     Print warnings from MISP warning lists.
 
@@ -317,11 +367,11 @@ def print_warning_lists(warnings: Dict[str, List[Dict[str, str]]]) -> None:
 
 def process_file(
     file_path: Path,
-    file_type: Optional[str] = None,
+    file_type: str | None = None,
     defang: bool = True,
     check_warnings: bool = True,
     force_update: bool = False,
-) -> Tuple[Dict[str, List[Union[str, Dict[str, str]]]], Dict[str, List[Dict[str, str]]]]:
+) -> tuple[dict[str, list[str | dict[str, str]]], dict[str, list[dict[str, str]]]]:
     """
     Process a single file and extract IOCs.
 
@@ -364,10 +414,10 @@ def process_file(
 
         # Extract IOCs
         extractor = IOCExtractor(defang=defang)
-        raw_iocs: Dict[str, List[str]] = extractor.extract_all(text_content)
-        # Convert to Union type for compatibility
-        iocs: Dict[str, List[Union[str, Dict[str, str]]]] = {
-            k: cast("List[Union[str, Dict[str, str]]]", v) for k, v in raw_iocs.items()
+        raw_iocs: dict[str, list[str]] = extractor.extract_all(text_content)
+        # Convert to Union type for compatibility with warning list processing
+        iocs: dict[str, list[str | dict[str, str]]] = {
+            k: list(v) for k, v in raw_iocs.items()
         }
 
         # Check against warning lists
@@ -387,13 +437,13 @@ def process_file(
 
 
 def process_multiple_files(
-    file_paths: List[Path],
-    file_type: Optional[str] = None,
+    file_paths: list[Path],
+    file_type: str | None = None,
     defang: bool = True,
     check_warnings: bool = True,
     force_update: bool = False,
     max_workers: int = MAX_WORKERS,
-) -> Dict[str, Tuple[Dict[str, List[Union[str, Dict[str, str]]]], Dict[str, List[Dict[str, str]]]]]:
+) -> dict[str, tuple[dict[str, list[str | dict[str, str]]], dict[str, list[dict[str, str]]]]]:
     """
     Process multiple files in parallel.
 
@@ -409,11 +459,11 @@ def process_multiple_files(
         Dictionary mapping file paths to (normal_iocs, warning_iocs) tuples
     """
     # Type alias to avoid long lines
-    result_type = Tuple[
-        Dict[str, List[Union[str, Dict[str, str]]]],
-        Dict[str, List[Dict[str, str]]],
+    result_type = tuple[
+        dict[str, list[str | dict[str, str]]],
+        dict[str, list[dict[str, str]]],
     ]
-    results: Dict[str, result_type] = {}
+    results: dict[str, result_type] = {}
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks
@@ -438,8 +488,8 @@ def process_multiple_files(
                 logger.info(f"Successfully processed {file_path}")
             except Exception:
                 logger.exception(f"Failed to process {file_path}")
-                empty_result: Tuple[
-                    Dict[str, List[Union[str, Dict[str, str]]]], Dict[str, List[Dict[str, str]]],
+                empty_result: tuple[
+                    dict[str, list[str | dict[str, str]]], dict[str, list[dict[str, str]]],
                 ] = ({}, {})
                 results[str(file_path)] = empty_result
 
@@ -482,12 +532,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
 
 def setup_application(args: argparse.Namespace) -> None:
     """Set up logging and display banner."""
-    debug = cast("bool", get_arg(args, 'debug'))
-    verbose = cast("bool", get_arg(args, 'verbose'))
-    log_file_path = get_arg(args, 'log_file')
+    debug = get_bool_arg(args, 'debug')
+    verbose = get_bool_arg(args, 'verbose')
+    log_file_path = get_optional_str_arg(args, 'log_file')
 
     log_level = logging.DEBUG if debug else (logging.INFO if verbose else logging.WARNING)
-    log_file = Path(str(log_file_path)) if log_file_path else None
+    log_file = Path(log_file_path) if log_file_path else None
     setup_logger(level=log_level, log_file=log_file)
 
     if not debug and not verbose:
@@ -502,7 +552,7 @@ def handle_misp_init() -> None:
     logger.info(f"Initialization completed. Downloaded {total_lists} warning lists.")
 
     # Show available list categories
-    categories: Dict[str, List[str]] = {}
+    categories: dict[str, list[str]] = {}
     for list_id, wlist in warning_lists.warning_lists.items():
         category = (
             str(wlist.get('name', '')).split(' ')[0].lower() if 'name' in wlist else 'other'
@@ -517,9 +567,9 @@ def handle_misp_init() -> None:
 
 def process_multiple_files_input(
     args: argparse.Namespace,
-) -> Tuple[Dict[str, List[Union[str, Dict[str, str]]]], Dict[str, List[Dict[str, str]]], str]:
+) -> tuple[dict[str, list[str | dict[str, str]]], dict[str, list[dict[str, str]]], str]:
     """Process multiple files input."""
-    multiple_files = cast("List[str]", get_arg(args, 'multiple'))
+    multiple_files = get_list_arg(args, 'multiple')
     file_paths = [Path(f) for f in multiple_files]
 
     # Validate all files exist
@@ -528,26 +578,22 @@ def process_multiple_files_input(
             logger.error(f"File not found: {file_path}")
             sys.exit(1)
 
-    parallel_workers = cast("int", get_arg(args, 'parallel'))
+    parallel_workers = get_int_arg(args, 'parallel', default=1)
     logger.info(f"Processing {len(file_paths)} files with {parallel_workers} workers")
 
-    file_type = cast("Optional[str]", get_arg(args, 'type'))
-    no_defang = cast("bool", get_arg(args, 'no_defang'))
-    no_check_warnings = cast("bool", get_arg(args, 'no_check_warnings'))
-    force_update = cast("bool", get_arg(args, 'force_update'))
-
+    opts = ProcessingOptions.from_args(args)
     results = process_multiple_files(
         file_paths,
-        file_type=file_type,
-        defang=not no_defang,
-        check_warnings=not no_check_warnings,
-        force_update=force_update,
+        file_type=opts.file_type,
+        defang=opts.defang,
+        check_warnings=opts.check_warnings,
+        force_update=opts.force_update,
         max_workers=parallel_workers,
     )
 
     # Aggregate results
-    all_normal_iocs: Dict[str, List[Union[str, Dict[str, str]]]] = {}
-    all_warning_iocs: Dict[str, List[Dict[str, str]]] = {}
+    all_normal_iocs: dict[str, list[str | dict[str, str]]] = {}
+    all_warning_iocs: dict[str, list[dict[str, str]]] = {}
 
     for normal_iocs, warning_iocs in results.values():
         for ioc_type, ioc_list in normal_iocs.items():
@@ -560,35 +606,22 @@ def process_multiple_files_input(
                 all_warning_iocs[ioc_type] = []
             all_warning_iocs[ioc_type].extend(warning_list)
 
-    # Remove duplicates automatically while preserving order
-    for ioc_type, ioc_list in all_normal_iocs.items():
-        unique_items: List[Union[str, Dict[str, str]]] = []
-        seen_keys: Set[str] = set()
-
-        for item in ioc_list:
-            # Create a unique key for each item (dicts use sorted items, strings use themselves)
-            key = str(sorted(item.items())) if isinstance(item, dict) else str(item)
-
-            # Only add if we haven't seen this key before
-            if key not in seen_keys:
-                seen_keys.add(key)
-                unique_items.append(item)
-
-        all_normal_iocs[ioc_type] = unique_items
+    # Remove duplicates
+    all_normal_iocs = deduplicate_iocs(all_normal_iocs)
 
     return all_normal_iocs, all_warning_iocs, f"{len(file_paths)} files"
 
 
 def process_single_input(
     args: argparse.Namespace,
-) -> Tuple[Dict[str, List[Union[str, Dict[str, str]]]], Dict[str, List[Dict[str, str]]], str]:
+) -> tuple[dict[str, list[str | dict[str, str]]], dict[str, list[dict[str, str]]], str]:
     """Process single file or URL input."""
-    file_arg = get_arg(args, 'file')
-    url_arg = get_arg(args, 'url')
-    url_direct_arg = get_arg(args, 'url_direct')
+    file_arg = get_optional_str_arg(args, 'file')
+    url_arg = get_optional_str_arg(args, 'url')
+    url_direct_arg = get_optional_str_arg(args, 'url_direct')
 
     if file_arg:
-        input_source = Path(cast("str", file_arg))
+        input_source = Path(file_arg)
         input_display = str(input_source)
         is_from_url = False
 
@@ -597,8 +630,10 @@ def process_single_input(
             sys.exit(1)
 
     else:
-        if url_arg or url_direct_arg:
-            url = str(url_arg if url_arg else url_direct_arg)
+        url = url_arg if url_arg else url_direct_arg
+        if not url:
+            logger.error("No URL provided")
+            sys.exit(1)
         input_display = url
         is_from_url = True
 
@@ -610,17 +645,13 @@ def process_single_input(
 
     # Process the file
     try:
-        file_type_arg = cast("Optional[str]", get_arg(args, 'type'))
-        no_defang_arg = cast("bool", get_arg(args, 'no_defang'))
-        no_check_warnings_arg = cast("bool", get_arg(args, 'no_check_warnings'))
-        force_update_arg = cast("bool", get_arg(args, 'force_update'))
-
+        opts = ProcessingOptions.from_args(args)
         normal_iocs, warning_iocs = process_file(
             input_source,
-            file_type=file_type_arg,
-            defang=not no_defang_arg,
-            check_warnings=not no_check_warnings_arg,
-            force_update=force_update_arg,
+            file_type=opts.file_type,
+            defang=opts.defang,
+            check_warnings=opts.check_warnings,
+            force_update=opts.force_update,
         )
     except (FileParsingError, IOCParserError):
         logger.exception("Failed to process file")
@@ -638,8 +669,8 @@ def process_single_input(
 
 
 def display_results(
-    normal_iocs: Dict[str, List[Union[str, Dict[str, str]]]],
-    warning_iocs: Dict[str, List[Dict[str, str]]],
+    normal_iocs: dict[str, list[str | dict[str, str]]],
+    warning_iocs: dict[str, list[dict[str, str]]],
 ) -> None:
     """Display extraction results summary."""
     total_iocs = sum(len(iocs) for iocs in normal_iocs.values())
@@ -657,13 +688,16 @@ def display_results(
 
 def save_output(
     args: argparse.Namespace,
-    normal_iocs: Dict[str, List[Union[str, Dict[str, str]]]],
-    warning_iocs: Dict[str, List[Dict[str, str]]],
+    normal_iocs: dict[str, list[str | dict[str, str]]],
+    warning_iocs: dict[str, list[dict[str, str]]],
     input_display: str,
 ) -> None:
     """Format and save output."""
-    formatter: Union[JSONFormatter, TextFormatter]
-    if cast("bool", args.json):
+    use_json = get_bool_arg(args, 'json')
+    output_path = get_optional_str_arg(args, 'output')
+
+    formatter: JSONFormatter | TextFormatter
+    if use_json:
         formatter = JSONFormatter(normal_iocs, warning_iocs=warning_iocs)
         output_format = "JSON"
     else:
@@ -672,20 +706,30 @@ def save_output(
 
     formatted_output = formatter.format()
 
-    if cast("object", args.output):
-        if cast("str", args.output) == "-":
+    if output_path:
+        if output_path == "-":
             print(formatted_output)
             logger.info(f"Results displayed in {output_format} format")
         else:
-            output_file = Path(str(cast("object", args.output)))
+            output_file = Path(output_path)
             formatter.save(str(output_file))
             logger.info(f"Results saved to {output_file}")
     else:
         # Auto-save with generated filename
         print(formatted_output)
-        output_filename = get_output_filename(input_display, is_json=cast("bool", args.json))
+        output_filename = get_output_filename(input_display, is_json=use_json)
         formatter.save(output_filename)
         logger.info(f"Results saved to {output_filename}")
+
+
+def has_input_args(args: argparse.Namespace) -> bool:
+    """Check if any input arguments are provided."""
+    return bool(
+        get_optional_str_arg(args, 'file')
+        or get_optional_str_arg(args, 'url')
+        or get_optional_str_arg(args, 'url_direct')
+        or get_list_arg(args, 'multiple'),
+    )
 
 
 def main() -> None:
@@ -697,25 +741,18 @@ def main() -> None:
         setup_application(args)
 
         # Handle initialization or force update request
-        if cast("bool", args.init) or cast("bool", args.force_update):
+        if get_bool_arg(args, 'init') or get_bool_arg(args, 'force_update'):
             handle_misp_init()
             return
 
         # Verify input is provided
-        # Check if any input arguments are provided
-        input_args = [
-            cast("object", args.file),
-            cast("object", args.url),
-            cast("object", args.url_direct),
-            cast("object", args.multiple),
-        ]
-        if not any(input_args):
+        if not has_input_args(args):
             parser.print_help()
             logger.error("No input provided. Use -f, -u, -m, --init, or --force-update")
             sys.exit(1)
 
         # Process input based on type
-        if cast("object", args.multiple):
+        if get_list_arg(args, 'multiple'):
             normal_iocs, warning_iocs, input_display = process_multiple_files_input(args)
         else:
             normal_iocs, warning_iocs, input_display = process_single_input(args)

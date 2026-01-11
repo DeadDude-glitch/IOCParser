@@ -5,7 +5,7 @@ Author: Marc Rivero | @seifreed
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, cast
+from typing import cast
 
 __version__ = "1.0.1"
 
@@ -31,12 +31,12 @@ __all__ = [
 ]
 
 def extract_iocs_from_file(
-    file_path: Union[str, Path],
+    file_path: str | Path,
     check_warnings: bool = True,
     force_update: bool = False,
-    file_type: Optional[str] = None,
+    file_type: str | None = None,
     defang: bool = True,
-) -> Tuple[Dict[str, List[Union[str, Dict[str, str]]]], Dict[str, List[Dict[str, str]]]]:
+) -> tuple[dict[str, list[str | dict[str, str]]], dict[str, list[dict[str, str]]]]:
     """
     Extract IOCs from a file.
 
@@ -79,7 +79,7 @@ def extract_iocs_from_text(
     check_warnings: bool = True,
     force_update: bool = False,
     defang: bool = True,
-) -> Tuple[Dict[str, List[Union[str, Dict[str, str]]]], Dict[str, List[Dict[str, str]]]]:
+) -> tuple[dict[str, list[str | dict[str, str]]], dict[str, list[dict[str, str]]]]:
     """
     Extract IOCs from text content.
 
@@ -96,8 +96,8 @@ def extract_iocs_from_text(
     extractor = IOCExtractor(defang=defang)
     raw_iocs = extractor.extract_all(text_content)
     # Convert to Union type for compatibility
-    iocs: Dict[str, List[Union[str, Dict[str, str]]]] = {
-        k: cast("List[Union[str, Dict[str, str]]]", v) for k, v in raw_iocs.items()
+    iocs: dict[str, list[str | dict[str, str]]] = {
+        k: cast("list[str | dict[str, str]]", v) for k, v in raw_iocs.items()
     }
 
     # Check against warning lists if enabled

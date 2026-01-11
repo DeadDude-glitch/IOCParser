@@ -28,6 +28,7 @@ from typing import (
 from iocparser.modules.exceptions import IOCFileNotFoundError
 from iocparser.modules.extractor import IOCExtractor
 from iocparser.modules.logger import get_logger
+from iocparser.modules.utils import deduplicate_iocs_with_state
 
 logger = get_logger(__name__)
 
@@ -64,6 +65,35 @@ class StreamingIOCExtractor:
         # Track IOCs to avoid duplicates
         self.seen_iocs: Dict[str, Set[str]] = defaultdict(set)
 
+    def _decode_chunk(self, data: Union[bytes, str]) -> str:
+        """
+        Decode bytes to string if needed.
+
+        Args:
+            data: Raw data that may be bytes or string
+
+        Returns:
+            Decoded string
+        """
+        if isinstance(data, bytes):
+            return data.decode('utf-8', errors='ignore')
+        return data
+
+    def _accumulate_iocs(
+        self,
+        target: Dict[str, List[str]],
+        source: Dict[str, List[str]],
+    ) -> None:
+        """
+        Accumulate IOCs from source into target dictionary.
+
+        Args:
+            target: Target dictionary to accumulate into
+            source: Source dictionary with IOCs to add
+        """
+        for ioc_type, ioc_list in source.items():
+            target[ioc_type].extend(ioc_list)
+
     def _read_chunks(
         self,
         file_obj: Union[BinaryIO, TextIO],
@@ -92,22 +122,10 @@ class StreamingIOCExtractor:
             pass
 
         while True:
-            if is_text:
-                chunk = file_obj.read(self.chunk_size)
-                if not chunk:
-                    break
-                # Ensure chunk is string
-                if isinstance(chunk, bytes):
-                    chunk = chunk.decode('utf-8', errors='ignore')
-            else:
-                chunk_data = file_obj.read(self.chunk_size)
-                if not chunk_data:
-                    break
-                # Convert bytes to string
-                if isinstance(chunk_data, bytes):
-                    chunk = chunk_data.decode('utf-8', errors='ignore')
-                else:
-                    chunk = chunk_data
+            raw_chunk = file_obj.read(self.chunk_size)
+            if not raw_chunk:
+                break
+            chunk = self._decode_chunk(raw_chunk)
 
             # Combine with overlap from previous chunk
             if previous_chunk_tail:
@@ -138,19 +156,7 @@ class StreamingIOCExtractor:
         Returns:
             Deduplicated IOCs
         """
-        unique_iocs: Dict[str, List[str]] = {}
-
-        for ioc_type, ioc_list in new_iocs.items():
-            unique = []
-            for ioc in ioc_list:
-                if ioc not in self.seen_iocs[ioc_type]:
-                    self.seen_iocs[ioc_type].add(ioc)
-                    unique.append(ioc)
-
-            if unique:
-                unique_iocs[ioc_type] = unique
-
-        return unique_iocs
+        return deduplicate_iocs_with_state(new_iocs, self.seen_iocs)
 
     def extract_from_file(
         self,
@@ -193,20 +199,14 @@ class StreamingIOCExtractor:
                         if yield_chunks:
                             yield unique_iocs
                         else:
-                            # Accumulate IOCs
-                            for ioc_type, ioc_list in unique_iocs.items():
-                                all_iocs[ioc_type].extend(ioc_list)
+                            self._accumulate_iocs(all_iocs, unique_iocs)
 
         except Exception:
             logger.exception(f"Error processing file {file_path}")
             raise
 
         if not yield_chunks:
-            result_dict: Dict[str, List[str]] = dict(all_iocs)
-            return result_dict
-        # This should not be reached when yield_chunks=True, as we yield in the loop
-        fallback_dict: Dict[str, List[str]] = dict(all_iocs)
-        return fallback_dict
+            return dict(all_iocs)
 
     def extract_from_stream(
         self,
@@ -276,22 +276,17 @@ class StreamingIOCExtractor:
                         chunk_end = min(offset + self.chunk_size, file_size)
 
                         # Read chunk
-                        chunk_bytes = mmapped_file[offset:chunk_end]
-                        chunk = chunk_bytes.decode('utf-8', errors='ignore')
+                        chunk = self._decode_chunk(mmapped_file[offset:chunk_end])
 
                         # Add overlap from next chunk if not at end
                         if chunk_end < file_size:
                             overlap_end = min(chunk_end + self.overlap, file_size)
-                            overlap_bytes = mmapped_file[chunk_end:overlap_end]
-                            chunk += overlap_bytes.decode('utf-8', errors='ignore')
+                            chunk += self._decode_chunk(mmapped_file[chunk_end:overlap_end])
 
-                        # Extract IOCs
+                        # Extract and accumulate IOCs
                         chunk_iocs = self.extractor.extract_all(chunk)
                         unique_iocs = self._deduplicate_iocs(chunk_iocs)
-
-                        # Accumulate IOCs
-                        for ioc_type, ioc_list in unique_iocs.items():
-                            all_iocs[ioc_type].extend(ioc_list)
+                        self._accumulate_iocs(all_iocs, unique_iocs)
 
                         # Progress callback
                         if self.progress_callback:

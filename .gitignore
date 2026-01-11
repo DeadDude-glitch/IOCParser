@@ -253,8 +253,8 @@ setup_quality.sh
 tox.ini
 MANIFEST.in
 
-# Tests directory (keep locally, not in repo)
-tests/
+# Tests directory - SHOULD be tracked in repo
+# tests/
 
 # Old modules directory (keep locally, not in repo)
 modules/
@@ -287,6 +287,7 @@ ioc_report*
 .claude/
 .ai_tools/
 .copilot/
+**/CLAUDE.md
 
 # Performance profiling
 *.prof

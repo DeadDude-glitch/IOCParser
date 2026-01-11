@@ -9,7 +9,7 @@ Author: Marc Rivero | @seifreed
 import logging
 import sys
 from pathlib import Path
-from typing import ClassVar, Optional, cast
+from typing import Callable, ClassVar, Optional
 
 
 class ColoredFormatter(logging.Formatter):
@@ -61,12 +61,11 @@ def setup_logger(
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(level)
 
-        # Use colored formatter for console
-        try:
-            has_isatty = hasattr(sys.stdout, 'isatty')
-            has_tty: bool = has_isatty and cast('bool', sys.stdout.isatty())
-        except (AttributeError, OSError):
-            has_tty = False
+        # Use colored formatter for console if TTY is available
+        has_tty: bool = False
+        if hasattr(sys.stdout, 'isatty'):
+            isatty_method: Callable[[], bool] = sys.stdout.isatty
+            has_tty = isatty_method()
         if has_tty:
             console_formatter: logging.Formatter = ColoredFormatter(
                 '%(levelname)s - %(message)s',
