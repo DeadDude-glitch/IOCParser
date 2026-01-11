@@ -108,8 +108,8 @@ class MISPWarningLists:
 
         # OPTIMIZATION: Pre-computed lookup structures
         self.string_lookups: Dict[str, Set[str]] = {}  # {value_lower: {list_ids}}
-        self.compiled_regex: Dict[str, List[re.Pattern]] = {}  # {list_id: [compiled_patterns]}
-        self.cidr_networks: Dict[str, List[ipaddress.IPv4Network]] = {}  # {list_id: [networks]}
+        self.compiled_regex: Dict[str, List[re.Pattern[str]]] = {}  # {list_id: [compiled_patterns]}
+        self.cidr_networks: Dict[str, List[Union[ipaddress.IPv4Network, ipaddress.IPv6Network]]] = {}  # {list_id: [networks]}
         self.lists_by_ioc_type: Dict[str, List[str]] = {}  # {ioc_type: [relevant_list_ids]}
 
         # Create the data directory if it doesn't exist
@@ -255,7 +255,7 @@ class MISPWarningLists:
                         
             elif list_type == 'regex':
                 # OPTIMIZATION: Pre-compile regex patterns
-                compiled_patterns = []
+                compiled_patterns: List[re.Pattern[str]] = []
                 for pattern in values_val:
                     if pattern is not None:
                         try:
@@ -268,7 +268,7 @@ class MISPWarningLists:
                     
             elif list_type == 'cidr':
                 # OPTIMIZATION: Pre-parse CIDR networks
-                networks = []
+                networks: List[Union[ipaddress.IPv4Network, ipaddress.IPv6Network]] = []
                 for cidr_value in values_val:
                     if cidr_value is not None and '/' in str(cidr_value):
                         try:
@@ -294,7 +294,7 @@ class MISPWarningLists:
 
         logger.info("Pre-processing complete")
 
-    @lru_cache(maxsize=10000)
+    @lru_cache(maxsize=10000)  # type: ignore[misc]
     def _clean_defanged_value(self, value: str) -> str:
         """
         Remove common defanging patterns from a value.
@@ -375,7 +375,7 @@ class MISPWarningLists:
 
         return None
 
-    @lru_cache(maxsize=5000)
+    @lru_cache(maxsize=5000)  # type: ignore[misc]
     def check_value(self, value: str, ioc_type: str) -> Tuple[bool, Optional[Dict[str, str]]]:
         """
         Optimized check if a value is on any warning list.

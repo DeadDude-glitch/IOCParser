@@ -11,7 +11,7 @@ import json
 import re
 import urllib.parse
 from pathlib import Path
-from typing import Callable, ClassVar, Dict, Iterable, List, Optional, Pattern, Set, Tuple, Union
+from typing import Callable, ClassVar, Dict, Iterable, List, Optional, Pattern, Set, Tuple, Union, cast
 
 from tqdm import tqdm
 
@@ -245,7 +245,7 @@ class IOCExtractor:
         if domains_file.exists():
             try:
                 with domains_file.open(encoding='utf-8') as f:
-                    data = json.load(f)
+                    data = cast(Dict[str, List[str]], json.load(f))
                     self.legitimate_domains = set(data.get('legitimate_domains', []))
                     self.legitimate_with_subdomains = set(
                         data.get('legitimate_with_subdomains', [])

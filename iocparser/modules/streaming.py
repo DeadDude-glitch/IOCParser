@@ -184,7 +184,7 @@ class StreamingIOCExtractor:
         # Reset seen IOCs for new file
         self.seen_iocs.clear()
 
-        all_iocs = defaultdict(list)
+        all_iocs: Dict[str, List[str]] = defaultdict(list)
 
         try:
             with file_path.open(encoding='utf-8', errors='ignore') as f:
@@ -207,6 +207,9 @@ class StreamingIOCExtractor:
 
         if not yield_chunks:
             return dict(all_iocs)
+
+        # Generator exhausted - return empty dict to satisfy type checker
+        return {}
 
     def extract_from_stream(
         self,
@@ -263,7 +266,7 @@ class StreamingIOCExtractor:
 
         # Reset seen IOCs
         self.seen_iocs.clear()
-        all_iocs = defaultdict(list)
+        all_iocs: Dict[str, List[str]] = defaultdict(list)
 
         try:
             with file_path.open('rb') as f, \
