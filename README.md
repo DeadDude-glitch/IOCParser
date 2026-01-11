@@ -1,31 +1,56 @@
-# IOCParser
+<p align="center">
+  <img src="https://img.shields.io/badge/IOCParser-Threat%20Intelligence-blue?style=for-the-badge" alt="IOCParser">
+</p>
 
-A tool for extracting Indicators of Compromise (IOCs) from security reports in HTML, PDF, and plain text formats.
+<h1 align="center">IOCParser</h1>
 
-Author: Marc Rivero | @seifreed  
-Version: 4.0.0
+<p align="center">
+  <strong>Extract Indicators of Compromise from security reports with ease</strong>
+</p>
 
-## Features
+<p align="center">
+  <a href="https://pypi.org/project/iocparser-tool/"><img src="https://img.shields.io/pypi/v/iocparser-tool?style=flat-square&logo=pypi&logoColor=white" alt="PyPI Version"></a>
+  <a href="https://pypi.org/project/iocparser-tool/"><img src="https://img.shields.io/pypi/pyversions/iocparser-tool?style=flat-square&logo=python&logoColor=white" alt="Python Versions"></a>
+  <a href="https://github.com/seifreed/iocparser/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License"></a>
+  <a href="https://github.com/seifreed/iocparser/actions"><img src="https://img.shields.io/github/actions/workflow/status/seifreed/iocparser/ci.yml?style=flat-square&logo=github&label=CI" alt="CI Status"></a>
+  <img src="https://img.shields.io/badge/coverage-93%25-brightgreen?style=flat-square" alt="Coverage">
+</p>
 
-- Extraction of multiple types of IOCs:
-  - Hashes (MD5, SHA1, SHA256, SHA512)
-  - Domains
-  - IP Addresses
-  - URLs
-  - Bitcoin addresses
-  - Email addresses
-  - Hosts
-  - CVEs
-  - Windows Registry entries
-  - Filenames
-  - Filepaths
-  - Yara rules
-- Automatic defanging of domains and IPs
-- Support for HTML, PDF, and plain text formats
-- Support for direct analysis from URLs
-- Output in JSON and plain text format
-- Checking against MISP warning lists to identify false positives
-- Can be used as a command-line tool or as a Python library
+<p align="center">
+  <a href="https://github.com/seifreed/iocparser/stargazers"><img src="https://img.shields.io/github/stars/seifreed/iocparser?style=flat-square" alt="GitHub Stars"></a>
+  <a href="https://github.com/seifreed/iocparser/issues"><img src="https://img.shields.io/github/issues/seifreed/iocparser?style=flat-square" alt="GitHub Issues"></a>
+  <a href="https://buymeacoffee.com/seifreed"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-yellow?style=flat-square&logo=buy-me-a-coffee&logoColor=white" alt="Buy Me a Coffee"></a>
+</p>
+
+---
+
+## Overview
+
+**IOCParser** is a powerful Python tool for extracting Indicators of Compromise (IOCs) from security reports. It supports HTML, PDF, and plain text formats, making it ideal for threat intelligence analysts, security researchers, and incident responders.
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-format Support** | Parse PDF, HTML, and plain text files |
+| **URL Analysis** | Extract IOCs directly from web URLs |
+| **MISP Integration** | Filter false positives using MISP warning lists |
+| **Defanging** | Automatic defanging of domains and IPs |
+| **Library Mode** | Use as CLI tool or Python library |
+| **JSON/Text Output** | Flexible output formats |
+
+### Supported IOC Types
+
+```
+Hashes          MD5, SHA1, SHA256, SHA512
+Network         Domains, IPs, URLs, Emails
+Cryptocurrency  Bitcoin addresses
+Vulnerabilities CVEs
+Windows         Registry keys, Filepaths, Filenames
+Detection       YARA rules
+```
+
+---
 
 ## Installation
 
@@ -38,220 +63,190 @@ pip install iocparser-tool
 ### From Source
 
 ```bash
-# Clone the repository
 git clone https://github.com/seifreed/iocparser.git
 cd iocparser
-
-# Create and activate virtual environment
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install as a package with all dependencies
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -e .
-
-# Or install just the requirements
-pip install -r requirements.txt
 ```
+
+---
 
 ## Quick Start
 
 ```bash
-# Initialize and download MISP warning lists (do this first)
+# Initialize MISP warning lists (first time only)
 iocparser --init
 
-# Analyze a PDF file
+# Analyze files
 iocparser -f report.pdf
-
-# Analyze an HTML file
 iocparser -f report.html
-
-# Analyze a text file
-iocparser -f report.txt
+iocparser -u https://example.com/report.html
 ```
 
-## Command Line Usage
+---
+
+## Usage
+
+### Command Line Interface
+
+```bash
+# Basic analysis
+iocparser -f report.pdf
+
+# Save output to file
+iocparser -f report.pdf -o results.json
+
+# JSON format output
+iocparser -f report.pdf --json
+
+# Analyze from URL
+iocparser -u https://example.com/report.html
+
+# Force specific file type
+iocparser -f report -t pdf
+```
+
+### Available Options
+
+| Option | Description |
+|--------|-------------|
+| `-f, --file` | Input file path |
+| `-u, --url` | URL to analyze |
+| `-o, --output` | Output file path |
+| `-t, --type` | Force file type (pdf, html, text) |
+| `--json` | Output in JSON format |
+| `--no-defang` | Disable IOC defanging |
+| `--no-check-warnings` | Skip MISP warning list check |
+| `--force-update` | Force update MISP lists |
+| `--init` | Initialize MISP warning lists |
+
+---
+
+## Python Library
 
 ### Basic Usage
 
-```bash
-# Initialize and download MISP warning lists (do this first)
-iocparser --init
-
-# Analyze a PDF file
-iocparser -f report.pdf
-
-# Analyze an HTML file
-iocparser -f report.html
-
-# Analyze a text file
-iocparser -f report.txt
-```
-
-### File Type Options
-
-```bash
-# Force specific file type (pdf, html, text)
-iocparser -f report -t pdf
-iocparser -f report -t html
-iocparser -f report -t text
-```
-
-### Output Options
-
-```bash
-# Save outputs to a specific file
-iocparser -f report.pdf -o results.json
-iocparser -f report.pdf -o results.txt
-
-# Print results to screen only
-iocparser -f report.pdf -o -
-
-# Use JSON format (default is text)
-iocparser -f report.pdf --json
-```
-
-### Analyzing from URL
-
-```bash
-# Analyze a report from a URL
-iocparser -u https://example.com/report.html
-
-# Specify content type for a URL
-iocparser -u https://example.com/report -t html
-```
-
-### Additional Options
-
-```
---no-defang          Disable automatic defanging of IOCs
---no-check-warnings  Don't check IOCs against MISP warning lists
---force-update       Force update of MISP warning lists
---init               Download and initialize MISP warning lists
--h, --help           Show help message
-```
-
-## Using as a Library
-
-You can use IOCParser as a library in your Python projects:
-
 ```python
-# Example 1: Extract IOCs from a file
-from iocparser import extract_iocs_from_file
+from iocparser import extract_iocs_from_file, extract_iocs_from_text
 
-# Process a file (automatically detects file type)
-normal_iocs, warning_iocs = extract_iocs_from_file('path/to/report.pdf')
-print(f"Found {len(normal_iocs.get('domains', []))} normal domains")
-print(f"Found {len(warning_iocs.get('domains', []))} potential false positive domains")
+# From file
+normal_iocs, warning_iocs = extract_iocs_from_file('report.pdf')
 
-# With additional options
-normal_iocs, warning_iocs = extract_iocs_from_file(
-    'path/to/report.html',
-    check_warnings=True,      # Check against MISP warning lists
-    force_update=False,       # Don't force update MISP lists
-    file_type='html',         # Force file type (optional)
-    defang=True               # Defang the IOCs
-)
-
-# Example 2: Extract IOCs from text content directly
-from iocparser import extract_iocs_from_text
-
-text = "This sample malware contacts evil.com with IP 192.168.1.1 and uses hash 5f4dcc3b5aa765d61d8327deb882cf99"
+# From text
+text = "Malware contacts evil.com at 192.168.1.1"
 normal_iocs, warning_iocs = extract_iocs_from_text(text)
 
-# Print the extracted IOCs
-for ioc_type, iocs_list in normal_iocs.items():
-    print(f"{ioc_type}: {iocs_list}")
+# Print results
+for ioc_type, iocs in normal_iocs.items():
+    print(f"{ioc_type}: {iocs}")
 ```
 
-### Using the Low-Level Components
-
-If you need more control, you can use the individual components directly:
+### Advanced Usage
 
 ```python
-from iocparser import IOCExtractor, PDFParser, HTMLParser, MISPWarningLists
+from iocparser import IOCExtractor, PDFParser, MISPWarningLists
 
-# Extract text from a PDF or HTML file
-parser = PDFParser("path/to/report.pdf")
-# or
-# parser = HTMLParser("path/to/report.html")
-text_content = parser.extract_text()
+# Extract text from PDF
+parser = PDFParser("report.pdf")
+text = parser.extract_text()
 
 # Extract IOCs
 extractor = IOCExtractor(defang=True)
-iocs = extractor.extract_all(text_content)
+iocs = extractor.extract_all(text)
 
-# Check against warning lists
+# Filter with MISP warning lists
 warning_lists = MISPWarningLists()
-normal_iocs, warning_iocs = warning_lists.separate_iocs_by_warnings(iocs)
+normal, warnings = warning_lists.separate_iocs_by_warnings(iocs)
 ```
 
-### Available Extraction Methods
+### Individual Extractors
 
 ```python
-from iocparser import IOCExtractor
-
 extractor = IOCExtractor(defang=True)
 
-# Extract specific IOC types
-md5_hashes = extractor.extract_md5(text)
-sha1_hashes = extractor.extract_sha1(text)
-sha256_hashes = extractor.extract_sha256(text)
-sha512_hashes = extractor.extract_sha512(text)
+# Extract specific types
+hashes_md5 = extractor.extract_md5(text)
+hashes_sha256 = extractor.extract_sha256(text)
 domains = extractor.extract_domains(text)
 ips = extractor.extract_ips(text)
 urls = extractor.extract_urls(text)
-bitcoin = extractor.extract_bitcoin(text)
-yara_rules = extractor.extract_yara_rules(text)
-hosts = extractor.extract_hosts(text)
 emails = extractor.extract_emails(text)
 cves = extractor.extract_cves(text)
-registry_keys = extractor.extract_registry(text)
-filenames = extractor.extract_filenames(text)
-filepaths = extractor.extract_filepaths(text)
-
-# Extract all IOC types at once
-all_iocs = extractor.extract_all(text)  # Returns a dictionary with all IOCs
+yara = extractor.extract_yara_rules(text)
+registry = extractor.extract_registry(text)
 ```
+
+---
 
 ## Examples
 
-### Extract IOCs from a local PDF report
-```bash
-iocparser -f reports/APT28_report.pdf
-```
+### Process Multiple Reports
 
-### Extract IOCs from a URL and save in JSON format
-```bash
-iocparser -u https://example.com/security-report.pdf --json
-```
-
-### Extract IOCs from an HTML file without defanging
-```bash
-iocparser -f report.html --no-defang
-```
-
-### Use in a Python script to process multiple files
 ```python
 from iocparser import extract_iocs_from_file
-import os
+from pathlib import Path
 
-reports_dir = "path/to/reports"
-for filename in os.listdir(reports_dir):
-    if filename.endswith(".pdf") or filename.endswith(".html"):
-        file_path = os.path.join(reports_dir, filename)
-        print(f"Processing {filename}...")
-        normal_iocs, warning_iocs = extract_iocs_from_file(file_path)
-        
-        # Do something with the extracted IOCs
-        print(f"Found {sum(len(iocs) for iocs in normal_iocs.values())} IOCs")
+reports_dir = Path("reports")
+for report in reports_dir.glob("*.pdf"):
+    normal, warnings = extract_iocs_from_file(report)
+    total = sum(len(v) for v in normal.values())
+    print(f"{report.name}: {total} IOCs found")
 ```
+
+### Export to JSON
+
+```bash
+iocparser -f apt_report.pdf --json -o iocs.json
+```
+
+### Analyze Threat Intelligence Feed
+
+```bash
+iocparser -u https://securelist.com/report.html --json
+```
+
+---
+
+## Requirements
+
+- Python 3.10+
+- See [pyproject.toml](pyproject.toml) for full dependency list
+
+---
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## Support the Project
+
+If you find IOCParser useful, consider supporting its development:
+
+<a href="https://buymeacoffee.com/seifreed" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50">
+</a>
+
+---
 
 ## License
 
-This project is available under the MIT License. You are free to use, modify, and distribute it, provided that you include the original copyright notice and attribution to the original author.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-**Required Attribution:**
-- Original Author: Marc Rivero | @seifreed
-- Repository: https://github.com/seifreed/iocparser
+**Attribution Required:**
+- Author: **Marc Rivero** | [@seifreed](https://github.com/seifreed)
+- Repository: [github.com/seifreed/iocparser](https://github.com/seifreed/iocparser)
 
-When using this project in your own work, please include a clear reference to the original author and repository. 
+---
+
+<p align="center">
+  <sub>Made with dedication for the threat intelligence community</sub>
+</p>
