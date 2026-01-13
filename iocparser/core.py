@@ -806,3 +806,4 @@ def has_input_args(args: argparse.Namespace) -> bool:
         or get_optional_str_arg(args, "url_direct")
         or get_list_arg(args, "multiple"),
     )
+# TODO: Separate CLI functions from backend functions
