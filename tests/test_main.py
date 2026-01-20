@@ -1571,7 +1571,7 @@ class TestMainFunction:
             def mock_process_file(*args, **kwargs):
                 raise KeyboardInterrupt()
 
-            monkeypatch.setattr('iocparser.__main__.process_file', mock_process_file)
+            monkeypatch.setattr('iocparser.core.process_file', mock_process_file)
 
             with pytest.raises(SystemExit) as exc_info:
                 main()
@@ -1598,7 +1598,7 @@ class TestMainFunction:
             def mock_process_file(*args, **kwargs):
                 raise RuntimeError("Unexpected error for testing")
 
-            monkeypatch.setattr('iocparser.__main__.process_file', mock_process_file)
+            monkeypatch.setattr('iocparser.core.process_file', mock_process_file)
 
             with pytest.raises(SystemExit) as exc_info:
                 main()
